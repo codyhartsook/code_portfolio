@@ -74,7 +74,7 @@ class Test():
 		self.realized_profit = 0
 
 		# data information
-		self.lookBack = 730 # 830
+		self.lookBack = 830 # 830
 		self.data = {}
 		self.begin = {}
 		self.end = {}
@@ -183,13 +183,13 @@ class Test():
 	def openPositions(self):
 		return self.open_positions
 
-	def possible_trade(self, pair, frame, o_slope, p_slope, obv, cycle, lev):
+	def possible_trade(self, pair, frame, flag, rg, o_slope, p_slope, obv, cycle, lev):
 		waiting_str = pair+","+frame
-		self.waiting[waiting_str] = [0, pair, frame, lev]
+		self.waiting[waiting_str] = [0, pair, frame, flag, rg, lev]
 		self.waiting_len += 1
 		self.obv_slope = np.append(self.obv_slope, o_slope)
 
-		self.ml_waiting[waiting_str] = [pair, frame, o_slope, p_slope, obv, cycle, lev]
+		#self.ml_waiting[waiting_str] = [pair, frame, o_slope, p_slope, obv, cycle, lev]
 
 	def Waiting(self):
 		return self.waiting
@@ -207,7 +207,7 @@ class Test():
 
 		positions = self.openPositions()
 		for ID in positions:
-			open_pair, open_frame = positions[ID]
+			open_pair, open_frame, rg = positions[ID]
 			
 			open_pair = open_pair.strip()
 			open_frame = open_frame.strip()
@@ -220,8 +220,7 @@ class Test():
 
 	def end_waiting(self, w_str):
 		del self.waiting[w_str]
-		del self.ml_waiting[w_str]
-
+		#del self.ml_waiting[w_str]
 
 
 	# interacts with find_signals
@@ -229,16 +228,16 @@ class Test():
 	# set the stop price for pair: stops[pair] = stop_price
 	# set open_positions[pair] = ID, frame: generate ID, last_ID+1
 	# update balance
-	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price):
+	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg):
 		ID = self.last_ID + 1
 		self.last_ID += 1
 
-		self.ml_data.insert(ID, [])
-		for elem in self.ml_waiting[pair+","+frame]:
-			self.ml_data[ID].append(str(elem))
+		#self.ml_data.insert(ID, [])
+		#for elem in self.ml_waiting[pair+","+frame]:
+			#self.ml_data[ID].append(str(elem))
 
 		self.trades[ID] = last_price, units
-		self.open_positions[ID] = pair, frame
+		self.open_positions[ID] = pair, frame, rg
 		self.stops[ID] = stop_price
 		self.trade_count += 1
 		self.total_trades += 1
@@ -262,7 +261,7 @@ class Test():
 	# manage all stop losses
 	def manage_stops(self):
 		for ID in list(self.open_positions):
-			pair, frame = self.open_positions[ID]
+			pair, frame, rg = self.open_positions[ID]
 			stop_p = self.stops[ID]
 			end_interval = self.end[frame]-1
 			close, low, high, op, vol, time = self.data[pair]
@@ -277,7 +276,7 @@ class Test():
 	# delete positions[pair], trades[pair], stops[pair]
 	def close_position(self, Account, ID, last_price):
 		
-		pair, frame = self.open_positions[ID]
+		pair, frame, rg = self.open_positions[ID]
 		time, vol, op, high, low, close = self.get_data(frame, pair)
 
 		if last_price != close[-1]:
@@ -288,13 +287,6 @@ class Test():
 		val2 = last_price*units
 
 		self.realized_profit += (val2-val1) # add to profit, could be negative
-		
-		# add ml tag for success or failure
-		"""if (val2-val1) < 0:
-			self.ml_data[ID].append(-1)
-		else: 
-			self.ml_data[ID].append(1)"""
-
 		self.trade_count -= 1
 		self.balance += (val2-val1)
 		self.margin = self.balance
@@ -354,7 +346,7 @@ class Test():
 		pos_val = 0
 		for ID in list(self.open_positions):
 			#print("open position")
-			pair, frame = self.open_positions[ID]
+			pair, frame, rg = self.open_positions[ID]
 			close, low, high, op, vol, time = self.data[pair]
 			last_price = close[-1]
 

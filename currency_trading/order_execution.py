@@ -9,7 +9,7 @@ def manage_position(Account, Trade):
 
 	# place an order for given pair
 	# -------------------------------------------------------------------------
-	def buy(units, pair, close, frame):
+	def buy(units, pair, close, frame, rg):
 	
 		# look at relative lows
 		last_price = close[-1]
@@ -17,7 +17,7 @@ def manage_position(Account, Trade):
 		l = len(close)
 
 		# find low point for stop loss
-		for lookBack in range(1, 30):
+		for lookBack in range(1, rg):
 			if min_price > close[l-lookBack]:
 				min_price = close[l-lookBack]
 
@@ -26,16 +26,16 @@ def manage_position(Account, Trade):
 		if frame == "H1":                #D
 			STOP_LOSS = max((last_price*.992), min_price)
 		elif frame == "H4":				 #H4
-			STOP_LOSS = max((last_price*.99), min_price)
+			STOP_LOSS = max((last_price*.985), min_price)
 		elif frame == "D":			 #H1
 			STOP_LOSS = max((last_price*.98), min_price)
 
 		# call order function from main module
-		Trade.stop_loss_trade(Account, units, pair, STOP_LOSS, frame, last_price)
+		Trade.stop_loss_trade(Account, units, pair, STOP_LOSS, frame, last_price, rg)
 
 	# determine if we should place an order on a waiting pair
 	# -------------------------------------------------------------------------
-	def buy_sig(op, high, low, close, lev, frame, pair, key_str):
+	def buy_sig(op, high, low, close, lev, frame, pair, flag, rg, key_str):
 		orders = 0
 
 		if frame=="H4":
@@ -44,7 +44,7 @@ def manage_position(Account, Trade):
 			rsi_level = 55
 
 		fastk, fastd = StochRSI(close)
-		if (fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1]):
+		if ((fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1])) or flag:
 
 			if Trade.can_trade(Account, pair, frame):
 				Balance = Account.getBalance()
@@ -64,14 +64,15 @@ def manage_position(Account, Trade):
 
 					units = trade_value/close[-1]
 
-					buy(units, pair, close, frame)
+					buy(units, pair, close, frame, rg)
 		
 		return orders
 
 	# determine if we should close a position
 	# -------------------------------------------------------------------------
-	def close_sig(op, high, low, close, pair, frame, ID):
-		if Account.age[ID] < 5:
+	def close_sig(op, high, low, close, pair, frame, ID, rg):
+		if Account.age[ID] < rg - 20:
+		#if Account.age[ID] < 5:
 			
 			# differentiate between backtest and real program
 			if Account == Trade:
@@ -120,13 +121,13 @@ def manage_position(Account, Trade):
 	close = []
 
 	for ID in list(positions):
-		pair, frame = positions[ID]
+		pair, frame, rg = positions[ID]
 		
 		time, vol, op, high, low, close = Account.get_data(frame, pair)
 		if vol.size == 0:
 			continue
 	
-		closed += close_sig(op, high, low, close, pair, frame, ID)
+		closed += close_sig(op, high, low, close, pair, frame, ID, rg)
 
 	# -------------------------------------------------------------------------
 	# see if there was a trigger hit
@@ -139,7 +140,9 @@ def manage_position(Account, Trade):
 		age = waiting[key_str][0]
 		pair = waiting[key_str][1]
 		frame = waiting[key_str][2]
-		lev = waiting[key_str][3]
+		flag = waiting[key_str][3]
+		rg = waiting[key_str][4]
+		lev = waiting[key_str][5]
 
 		# we want to add to waiting age but backtest 
 		#    and forex_trading pull data differently
@@ -161,7 +164,7 @@ def manage_position(Account, Trade):
 			if vol.size == 0:
 				continue
 
-			orders += buy_sig(op, high, low, close, lev, frame, pair, key_str)
+			orders += buy_sig(op, high, low, close, lev, frame, pair, flag, rg, key_str)
 		else:
 			Account.end_waiting(key_str)
 

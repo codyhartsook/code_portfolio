@@ -55,7 +55,8 @@ def find_signal(Account, Trade, Frame):
 					if prediction > 0.5:
 
 						# store pair/frame and relevant statistics to see if we want to buy later
-						Account.possible_trade(pair, frame, o_slope, p_slope, obv[-1], cycle_change, lev)
+						#Account.ml_buy(pair, frame)
+						Account.possible_trade(pair, frame, False, rang, o_slope, p_slope, obv[-1], cycle_change, lev)
 						return True, 1, 1
 	
 	# find slope in order to determine diveregence
@@ -92,7 +93,7 @@ def find_signal(Account, Trade, Frame):
 				if (o_slope > 0) and (p_slope < 0) and (obv[0] < obv[-1]) and (cycle_change > 1.065):
 					
 					# store pair/frame and relevant statistics to see if we want to buy later
-					Account.possible_trade(pair, frame, o_slope, p_slope, obv[-1], cycle_change, lev)
+					Account.possible_trade(pair, frame, True, rg, o_slope, p_slope, obv[-1], cycle_change, lev)
 					return True, 1, 1
 
 		return False, 0, 0 # did not find a divergence
@@ -176,7 +177,7 @@ def find_signal(Account, Trade, Frame):
 			I_diff = mx - ((first + second) / 2)
 			I_delta = (I_diff / ((first + second) / 2)) * 100
 
-			if I_delta > 0.25 and T_delta < 0.15:
+			if I_delta > 0.15 and T_delta < 0.15:
 				return True, second
 		
 		return False, 0
@@ -209,6 +210,7 @@ def find_signal(Account, Trade, Frame):
 
 		# find slopes and divergencies
 		find_sig2(high, low, close, obv, pair, Frame)
+		#find_sig(high, low, close, obv, pair, Frame)
 
 
 
