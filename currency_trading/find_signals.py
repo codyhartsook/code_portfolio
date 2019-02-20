@@ -8,7 +8,10 @@ from utility_funcs import NATR, OBV, RSI
 
 def find_signal(Account, Trade, Frame):
 
-	# uses the Deep Neural Net to make a prdiction
+	# uses the Deep Neural Net to make a prediction
+	# find slope in order to determine diveregence
+	# compute slope value for all ranges length-rg
+	# -------------------------------------------------------------------------
 	def find_sig2(high, low, close, OBV_in, pair, frame):
 		
 		# normalize obv in order to filter min slope
@@ -16,9 +19,6 @@ def find_signal(Account, Trade, Frame):
 		minv = min(OBV_in)
 		sc = max(abs(minv), maxv)
 		OBV = [(x+sc+1)/sc for x in OBV_in]
-
-		#scaler = preprocessing.MinMaxScaler()
-		#obv = scaler.fit_transform(obv)
 
 		for rg in range(28, 60):
 			begin = (len(close) - rg)
@@ -28,7 +28,12 @@ def find_signal(Account, Trade, Frame):
 			pr = np.array(close[begin:end])
 			obv = np.array(OBV[begin:end])
 
-			sig, lev = dual_troughs(pr)
+			if frame == "H1":
+				level = 0.11
+			elif frame == "H4":
+				level = 0.15
+
+			sig, lev = dual_troughs(pr, level)
 			if sig:
 				
 				p_slope = slope(pr)           # slope of price
@@ -44,19 +49,19 @@ def find_signal(Account, Trade, Frame):
 					pred_data = np.array([[rang, high[-1], low[-1], close[-1],
 							close[len(close)-2], close[len(close)-3], lev, o_slope, 
 							p_slope, obv[-1], obv[len(obv)-2], obv[len(obv)-3], 
-							rsi[-1], rsi[len(rsi)-2], rsi[len(rsi)-3], natr[-1], 
+							rsi[-1], rsi[len(rsi)-2], rsi[len(rsi)-3], natr[-1],
 							cycle_change]])
 
 					# scale the data with the same scaler used in training
-					pred_data = Account.scaler.transform(pred_data)
 					# make a prediction using the ml model
-					prediction = Account.model.predict(pred_data)
+					preddata = Account.scaler.transform(pred_data)
+					prediction = Account.model.predict(preddata)
 
 					if prediction > 0.5:
 
-						# store pair/frame and relevant statistics to see if we want to buy later
-						#Account.ml_buy(pair, frame)
-						Account.possible_trade(pair, frame, False, rang, o_slope, p_slope, obv[-1], cycle_change, lev)
+						# this is a candadate for a trade
+						Account.possible_trade(pair, frame, prediction, rang, o_slope, p_slope, obv[-1], 
+								cycle_change, lev)
 						return True, 1, 1
 	
 	# find slope in order to determine diveregence
@@ -89,6 +94,7 @@ def find_signal(Account, Trade, Frame):
 				mx = max(obv)
 				diff = mx - obv[-1]
 				delta = (diff / obv[-1] * 100)
+
 				# This is the filter for possible trades:
 				if (o_slope > 0) and (p_slope < 0) and (obv[0] < obv[-1]) and (cycle_change > 1.065):
 					
@@ -141,7 +147,7 @@ def find_signal(Account, Trade, Frame):
 	# find dual troughs: right now dont care which trough is lower
 	# this will ensure that there is support for the trade
 	# we also want to make sure that there is price change between the lows
-	def dual_troughs(close):
+	def dual_troughs(close, level):
 		cl_len = len(close)
 
 		first = second = 1000 # smallest, 2nd smallest = value > any currency
@@ -177,7 +183,7 @@ def find_signal(Account, Trade, Frame):
 			I_diff = mx - ((first + second) / 2)
 			I_delta = (I_diff / ((first + second) / 2)) * 100
 
-			if I_delta > 0.15 and T_delta < 0.15:
+			if I_delta > level and T_delta < level:
 				return True, second
 		
 		return False, 0

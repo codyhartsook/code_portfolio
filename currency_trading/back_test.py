@@ -39,6 +39,8 @@ class Test():
 		# load ml model to use for predictions
 		self.model = load_model('DNN_Breakout')
 		self.scaler = joblib.load("scaler.save")
+		self.sell_model = load_model('SELL_OPT')
+		self.sell_scaler = joblib.load("sell_scaler.save")
 
 		# position and trade information
 		self.open_positions = {} # keep track of open positions
@@ -46,8 +48,8 @@ class Test():
 		self.stops = {}          # stop price for given order ID
 		self.age = {}
 		self.waiting = {}
-		self.ml_waiting = {}     # ml data that we will use it the pair/frame order goes through
-		self.ml_data = [[]]      # ml data for all orders, contains label if order ended in profit
+		self.ml_waiting = {}
+		self.ml_data = {}      # ml data for all orders, contains label if order ended in profit
 		self.waiting_len = 0
 		self.stopped = 0
 		self.mv_stopped = 0
@@ -65,16 +67,18 @@ class Test():
 		self.worst_trade[0] = '', '', ''
 		
 		# find optimized leverage
+		self.lev_range = .04, .065
+		self.avg_lev = 0
 		self.leverage = {}
 		self.leverage["H1"] = 0.02
-		self.leverage["H4"] = 0.06
-		self.leverage["D"] = 0.06
-		self.lev_boost = 0.07
+		self.leverage["H4"] = 0.05
+		self.leverage["D"] = 0.05
+		self.lev_boost = 0.06
 		self.margin = 10000
 		self.realized_profit = 0
 
 		# data information
-		self.lookBack = 830 # 830
+		self.lookBack = 730 # 830
 		self.data = {}
 		self.begin = {}
 		self.end = {}
@@ -183,13 +187,10 @@ class Test():
 	def openPositions(self):
 		return self.open_positions
 
-	def possible_trade(self, pair, frame, flag, rg, o_slope, p_slope, obv, cycle, lev):
+	def possible_trade(self, pair, frame, prediction, rg, o_slope, p_slope, obv, cycle, lev):
 		waiting_str = pair+","+frame
-		self.waiting[waiting_str] = [0, pair, frame, flag, rg, lev]
+		self.waiting[waiting_str] = [0, pair, frame, prediction, rg, lev]
 		self.waiting_len += 1
-		self.obv_slope = np.append(self.obv_slope, o_slope)
-
-		#self.ml_waiting[waiting_str] = [pair, frame, o_slope, p_slope, obv, cycle, lev]
 
 	def Waiting(self):
 		return self.waiting
@@ -222,8 +223,6 @@ class Test():
 		del self.waiting[w_str]
 		#del self.ml_waiting[w_str]
 
-
-	# interacts with find_signals
 	# set the buy price of pair: trades[ID] = currprice, units
 	# set the stop price for pair: stops[pair] = stop_price
 	# set open_positions[pair] = ID, frame: generate ID, last_ID+1
@@ -232,9 +231,8 @@ class Test():
 		ID = self.last_ID + 1
 		self.last_ID += 1
 
-		#self.ml_data.insert(ID, [])
-		#for elem in self.ml_waiting[pair+","+frame]:
-			#self.ml_data[ID].append(str(elem))
+		#self.ml_data[ID] = self.ml_waiting[pair+","+frame]
+		#self.ml_data[ID] = np.insert(self.ml_data[ID], 0, ID, axis=0)
 
 		self.trades[ID] = last_price, units
 		self.open_positions[ID] = pair, frame, rg
@@ -298,10 +296,6 @@ class Test():
 
 		if (val2-val1) < 0:
 			self.losing_tades[ID] = time[-1], pair, frame
-			"""for loss in self.worst_trade:
-				if (val2-val1) < loss:
-					del self.worst_trade[loss]
-					self.worst_trade[(val2-val1)] = time[-1], pair, frame"""
 
 		print("< CLOSE ORDER:----------------------------------------------")
 		print("< order placed at", time[-1])
@@ -314,21 +308,25 @@ class Test():
 		del self.stops[ID]
 		del self.age[ID]
 
-	def write_ml_data(self):
-		# clear trace file
-		open('trade_data.csv', 'w').close()
-		with open('trade_data.csv', 'a') as f_writer:
-			#write column names
-			ln = "pair,frame,o_slope,p_slope,obv,cycle,range,result\n"
+	def init_write(self):
+		open('sell_time.csv', 'w').close()
+		with open('sell_time.csv', 'a') as f_writer:
+			
+			ln = "ID,rg,h,l,c1,c2,c3,supp,o_s,p_s,obv1,obv2,obv3,rsi1,rsi2,rsi3,natr,cyc,stF,stS,rsi,obv,natrF,alF, alS,fC\n"
 			f_writer.write(ln)
-			for row in self.ml_data:
-				ln = ""
-				for col in row:
-					if col == row[-1]:
-						ln += str(col) + "\n"
-					else:
-						ln += str(col) + ","
-				f_writer.write(ln)
+			f_writer.close()
+	
+	def write_data(self, ID, data):
+		with open('sell_time.csv', 'a') as f_writer:
+			
+			ln = str(ID) + ","
+			for item in data:
+				if item == data[-1]:
+					ln += str(item) + "\n"
+				else:
+					ln += str(item) + ","
+
+			f_writer.write(ln)
 			f_writer.close()
 
 	# print account summary
@@ -363,10 +361,7 @@ class Test():
 		print("Min account balance:", self.min_balance_reached)
 		print("Reached after", self.low, "trades")
 		print("Negative trade count:", len(self.losing_tades))
-		"""print("worst trade:")
-		for loss in self.worst_trade:
-			time, pair, frame = self.worst_trade[loss]
-			print(pair, "-", frame, " at ", time)"""
+		print("average leverage:", self.avg_lev / self.total_trades)
 		print("Negative trades:")
 		for ID in self.losing_tades:
 			time, pair, frame = self.losing_tades[ID]
@@ -394,6 +389,7 @@ if __name__ == "__main__":
 	print("// look back is", TEST.lookBack, "days")
 	print("/////////////////////////////////////////////////////////////////////////\n")
 
+	TEST.init_write()
 
 	if chart_time == "H1":
 		# run backtest for highest frequency chart time

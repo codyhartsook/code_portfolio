@@ -2,14 +2,36 @@
 # sub program to close account positions
 
 import time
-from utility_funcs import StochRSI, bullish_candles, bearish_candles, ALMA, RSI, MACD
+import numpy as np
+from utility_funcs import StochRSI, bullish_candles, bearish_candles, ALMA, RSI, MACD, OBV, NATR
 
 
 def manage_position(Account, Trade):
 
+	# utility function
+	# -------------------------------------------------------------------------
+	def flatten(arg):
+		flat = []
+		for arr in arg:
+			for indx in range(len(arr)-8, len(arr)):
+				flat.append(arr[indx])
+		out = np.array([flat])
+		return out
+
+	# convert range of prediction 
+	# -------------------------------------------------------------------------
+	def transform(weight):
+		mn, mx = Account.lev_range
+		
+		OldRange = (1.0 - 0.5)
+		NewRange = (mx - mn)
+		NewValue = (((weight - 0.5) * NewRange) / OldRange) + mn
+
+		return NewValue[0][0]
+
 	# place an order for given pair
 	# -------------------------------------------------------------------------
-	def buy(units, pair, close, frame, rg):
+	def buy(units, pair, frame, close, lev, rg):
 	
 		# look at relative lows
 		last_price = close[-1]
@@ -35,7 +57,7 @@ def manage_position(Account, Trade):
 
 	# determine if we should place an order on a waiting pair
 	# -------------------------------------------------------------------------
-	def buy_sig(op, high, low, close, lev, frame, pair, flag, rg, key_str):
+	def buy_sig(weight, op, high, low, close, lev, pair, frame, rg):
 		orders = 0
 
 		if frame=="H4":
@@ -44,35 +66,41 @@ def manage_position(Account, Trade):
 			rsi_level = 55
 
 		fastk, fastd = StochRSI(close)
-		if ((fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1])) or flag:
+		if ((fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1])):
 
 			if Trade.can_trade(Account, pair, frame):
 				Balance = Account.getBalance()
+				
+				# we are ready to make a trade
 				if Balance > 0:
 					orders = 1
 
+					# see if there was a bullish candle present
 					candle = False
 					hammer, engulf, pierce = bullish_candles(op, high, low, close)
 					if hammer[-1] > 0 or engulf[-1] > 0 or pierce[-1] > 0:
 						candle = True
 
+					# define the leverage based of prediction weight
+					leverage = transform(weight)
+					Account.avg_lev += leverage
 					# if we found reversal candle, increase leverage slightly
 					if candle:
 						trade_value = (Balance*Account.lev_boost*50)
 					else:
-						trade_value = (Balance*Account.leverage[frame])*50
+						trade_value = (Balance*leverage)*50
 
 					units = trade_value/close[-1]
-
-					buy(units, pair, close, frame, rg)
+					buy(units, pair, frame, close, lev, rg)
 		
 		return orders
 
 	# determine if we should close a position
 	# -------------------------------------------------------------------------
 	def close_sig(op, high, low, close, pair, frame, ID, rg):
-		if Account.age[ID] < rg - 20:
-		#if Account.age[ID] < 5:
+
+		# let trade develop
+		if Account.age[ID] < (rg - 20):
 			
 			# differentiate between backtest and real program
 			if Account == Trade:
@@ -88,10 +116,22 @@ def manage_position(Account, Trade):
 			Account.age[ID] += age_acc
 			return 0
 
-		almaF, almaS = ALMA(close)
-		fastk, fastd = StochRSI(close)
+		rsi = RSI(close)
+		obv = OBV(close, vol)
+		natr = NATR(high, low, close)
+		aF, aS = ALMA(close)
+		stF, stS = StochRSI(close)
+		
+		# prep data for model prediction
+		# predict the whether we should exit or not
+		# -------------------------------------------------------------
+		ta_data = [close, obv, rsi, aF, aS, stF, stS, natr]
+		pred_data = flatten(ta_data)
+		pred_data = Account.sell_scaler.transform(pred_data)
+		prediction = Account.sell_model.predict(pred_data)
 
-		if almaF[-1] < almaS[-1] and fastk[-1] < fastd[-1]:
+		if prediction < 0.5:
+		#if (aF[-1] < aS[-1] and stF[-1] < stS[-1]):
 			closed = close_pos(ID, close)
 		return 1
 
@@ -140,7 +180,7 @@ def manage_position(Account, Trade):
 		age = waiting[key_str][0]
 		pair = waiting[key_str][1]
 		frame = waiting[key_str][2]
-		flag = waiting[key_str][3]
+		weight = waiting[key_str][3]
 		rg = waiting[key_str][4]
 		lev = waiting[key_str][5]
 
@@ -164,7 +204,7 @@ def manage_position(Account, Trade):
 			if vol.size == 0:
 				continue
 
-			orders += buy_sig(op, high, low, close, lev, frame, pair, flag, rg, key_str)
+			orders += buy_sig(weight, op, high, low, close, lev, pair, frame, rg)
 		else:
 			Account.end_waiting(key_str)
 
