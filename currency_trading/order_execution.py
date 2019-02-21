@@ -23,9 +23,9 @@ def manage_position(Account, Trade):
 	def transform(weight):
 		mn, mx = Account.lev_range
 		
-		OldRange = (1.0 - 0.5)
+		OldRange = (1.0 - 0.4)
 		NewRange = (mx - mn)
-		NewValue = (((weight - 0.5) * NewRange) / OldRange) + mn
+		NewValue = (((weight - 0.4) * NewRange) / OldRange) + mn
 
 		return NewValue[0][0]
 
@@ -46,11 +46,9 @@ def manage_position(Account, Trade):
 		STOP_LOSS = 0
 		# for now, determine stop based on frame
 		if frame == "H1":                #D
-			STOP_LOSS = max((last_price*.992), min_price)
+			STOP_LOSS = max((last_price*.99), min_price)
 		elif frame == "H4":				 #H4
 			STOP_LOSS = max((last_price*.985), min_price)
-		elif frame == "D":			 #H1
-			STOP_LOSS = max((last_price*.98), min_price)
 
 		# call order function from main module
 		Trade.stop_loss_trade(Account, units, pair, STOP_LOSS, frame, last_price, rg)
@@ -110,9 +108,7 @@ def manage_position(Account, Trade):
 					age_acc = (1.0/4)
 				elif frame == "H4":
 					age_acc = (1.0/16)
-				elif frame == "D":
-					age_acc = (1.0/96)
-
+	
 			Account.age[ID] += age_acc
 			return 0
 
@@ -127,8 +123,15 @@ def manage_position(Account, Trade):
 		# -------------------------------------------------------------
 		ta_data = [close, obv, rsi, aF, aS, stF, stS, natr]
 		pred_data = flatten(ta_data)
-		pred_data = Account.sell_scaler.transform(pred_data)
-		prediction = Account.sell_model.predict(pred_data)
+
+		if frame == "H1":
+			pred_data = Account.H1_SELL_scaler.transform(pred_data)
+			prediction = Account.H1_SELL_model.predict(pred_data)
+
+		elif frame == "H4":
+			pred_data = Account.H4_SELL_scaler.transform(pred_data)
+			prediction = Account.H4_SELL_model.predict(pred_data)
+
 
 		if prediction < 0.5:
 		#if (aF[-1] < aS[-1] and stF[-1] < stS[-1]):
@@ -146,15 +149,13 @@ def manage_position(Account, Trade):
 			
 			buffer_time = 10       
 			time.sleep(buffer_time) # wait 10 seconds
-			close_pos(ID)  # make recursive call to close position
+			close_pos(ID, close)  # make recursive call to close position
 
 		return closed
 
 	# -------------------------------------------------------------------------
 	# see if we need to close any positions
 	# -------------------------------------------------------------------------
-	
-	# evaluate positions held
 	closed = 0
 	positions = Account.openPositions()
 	vol = []
@@ -177,6 +178,7 @@ def manage_position(Account, Trade):
 	
 	for key_str in list(waiting):
 
+		# get data for our waiting pair/frame object
 		age = waiting[key_str][0]
 		pair = waiting[key_str][1]
 		frame = waiting[key_str][2]
@@ -193,8 +195,6 @@ def manage_position(Account, Trade):
 				age_acc = (1.0/4)
 			elif frame == "H4":
 				age_acc = (1.0/16)
-			elif frame == "D":
-				age_acc = (1.0/96)
 		
 		if age < 3:
 			Account.waiting[key_str][0] += age_acc # add to age

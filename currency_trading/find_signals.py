@@ -12,7 +12,7 @@ def find_signal(Account, Trade, Frame):
 	# find slope in order to determine diveregence
 	# compute slope value for all ranges length-rg
 	# -------------------------------------------------------------------------
-	def find_sig2(high, low, close, OBV_in, pair, frame):
+	def find_sig(high, low, close, OBV_in, pair, frame):
 		
 		# normalize obv in order to filter min slope
 		maxv = max(OBV_in)
@@ -29,7 +29,7 @@ def find_signal(Account, Trade, Frame):
 			obv = np.array(OBV[begin:end])
 
 			if frame == "H1":
-				level = 0.11
+				level = 0.10
 			elif frame == "H4":
 				level = 0.15
 
@@ -43,7 +43,12 @@ def find_signal(Account, Trade, Frame):
 				cycle_change = swing(close)   # price cycle range
 				rang = end - begin
 
-				if (cycle_change > 1.06) and (o_slope > 0):
+				if frame == "H1":
+					price_diff = 1.0
+				elif frame == "H4":
+					price_diff = 1.06
+
+				if (cycle_change > price_diff) and (o_slope > 0):
 
 					# add data to possible breakout
 					pred_data = np.array([[rang, high[-1], low[-1], close[-1],
@@ -54,8 +59,12 @@ def find_signal(Account, Trade, Frame):
 
 					# scale the data with the same scaler used in training
 					# make a prediction using the ml model
-					preddata = Account.scaler.transform(pred_data)
-					prediction = Account.model.predict(preddata)
+					if frame == "H1":
+						preddata = Account.H1_BR_scaler.transform(pred_data)
+						prediction = Account.H1_BR_model.predict(preddata)
+					elif frame == "H4":
+						preddata = Account.H4_BR_scaler.transform(pred_data)
+						prediction = Account.H4_BR_model.predict(preddata)
 
 					if prediction > 0.5:
 
@@ -63,46 +72,6 @@ def find_signal(Account, Trade, Frame):
 						Account.possible_trade(pair, frame, prediction, rang, o_slope, p_slope, obv[-1], 
 								cycle_change, lev)
 						return True, 1, 1
-	
-	# find slope in order to determine diveregence
-	# compute slope value for all ranges length-rg
-	# -----------------------------------------------------------------------------
-	def find_sig(high, low, close, OBV_in, pair, frame):
-		
-		# normalize obv in order to filter min slope
-		maxv = max(OBV_in)
-		minv = min(OBV_in)
-		sc = max(abs(minv), maxv)
-		OBV = [(x+sc+1)/sc for x in OBV_in]
-
-		for rg in range(28, 60):
-			begin = (len(close) - rg)
-			end = len(close)
-	
-			# slice arrays by interval rg to length
-			pr = np.array(close[begin:end])
-			obv = np.array(OBV[begin:end])
-			
-			sig, lev = dual_troughs(pr)
-			if sig:
-				
-				p_slope = slope(pr)
-				o_slope = slope(obv)
-
-				# we want there to be volatility
-				cycle_change = swing(close)
-				mx = max(obv)
-				diff = mx - obv[-1]
-				delta = (diff / obv[-1] * 100)
-
-				# This is the filter for possible trades:
-				if (o_slope > 0) and (p_slope < 0) and (obv[0] < obv[-1]) and (cycle_change > 1.065):
-					
-					# store pair/frame and relevant statistics to see if we want to buy later
-					Account.possible_trade(pair, frame, True, rg, o_slope, p_slope, obv[-1], cycle_change, lev)
-					return True, 1, 1
-
-		return False, 0, 0 # did not find a divergence
 
 	# compute the slope using np.polyfit with order 1
 	def slope(y):
@@ -215,8 +184,7 @@ def find_signal(Account, Trade, Frame):
 		obv = OBV(close, vol)
 
 		# find slopes and divergencies
-		find_sig2(high, low, close, obv, pair, Frame)
-		#find_sig(high, low, close, obv, pair, Frame)
+		find_sig(high, low, close, obv, pair, Frame)
 
 
 

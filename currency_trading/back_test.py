@@ -36,11 +36,15 @@ class Test():
 						'EUR_AUD', 'EUR_CAD', 'EUR_CHF', 'GBP_HKD', 'GBP_JPY', 'USD_DKK',
 						'USD_THB', 'EUR_CZK']
 
-		# load ml model to use for predictions
-		self.model = load_model('DNN_Breakout')
-		self.scaler = joblib.load("scaler.save")
-		self.sell_model = load_model('SELL_OPT')
-		self.sell_scaler = joblib.load("sell_scaler.save")
+		# load ml models and scalers to make predictions
+		self.H4_BR_model = load_model('H4_DNN_Breakout')
+		self.H1_BR_model = load_model('H1_DNN_Breakout')
+		self.H4_SELL_model = load_model('H4_SELL_OPT')
+		self.H1_SELL_model = load_model('H1_SELL_OPT')
+		self.H4_BR_scaler = joblib.load('H4_BR_scaler.save')
+		self.H1_BR_scaler = joblib.load('H1_BR_scaler.save')
+		self.H4_SELL_scaler = joblib.load('H4_SELL_scaler.save')
+		self.H1_SELL_scaler = joblib.load('H1_SELL_scaler.save')
 
 		# position and trade information
 		self.open_positions = {} # keep track of open positions
