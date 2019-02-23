@@ -1,10 +1,11 @@
 #!/usr/bin/python
 
 # main program:
-# contains account and trade information as well as outer control loop
+# contains account and trade information
+# -----------------------------------------------------------------------------
+import warnings
+warnings.filterwarnings("ignore")
 
-import time
-from datetime import datetime
 import oandapyV20
 from Authenticate import Auth
 from find_signals import find_signal
@@ -20,32 +21,51 @@ from oandapyV20.contrib.requests import (
     TakeProfitDetails,
     StopLossDetails)
 
+# for ml predictions
+from sklearn import preprocessing
+from sklearn.externals import joblib
+from keras.models import load_model
+
 # -----------------------------------------------------------------------------
 # class account
 # store and update account information to be accessed by modules
 # -----------------------------------------------------------------------------
 class Account():
 	def __init__(self):
-		sself.account_ID, self.access_token = Auth()
+		# oanda info
+		self.accountID, self.access_token = Auth()
 		self.client = oandapyV20.API(access_token=self.access_token)
+
+		# load ml models and scalers to make predictions
+		self.H4_BR_model = load_model('H4_DNN_Breakout')
+		self.H1_BR_model = load_model('H1_DNN_Breakout')
+		self.H4_SELL_model = load_model('H4_SELL_OPT')
+		self.H1_SELL_model = load_model('H1_SELL_OPT')
+		self.H4_BR_scaler = joblib.load('H4_BR_scaler.save')
+		self.H1_BR_scaler = joblib.load('H1_BR_scaler.save')
+		self.H4_SELL_scaler = joblib.load('H4_SELL_scaler.save')
+		self.H1_SELL_scaler = joblib.load('H1_SELL_scaler.save')
+
+		# define leverage ranges
+		self.lev_range = {}
+		self.lev_range["H4"] = .04, .065
+		self.lev_range["H1"] = .03, .055
+		self.lev_boost = 0.06
+		self.avg_lev = 0
+
+		# account status information
 		self.balance = 0
-
-		# optimal leverage based on backtesting
-		self.leverage = {}
-		self.leverage["H1"] = 0.02
-		self.leverage["H4"] = 0.07
-		self.leverage["D"] = 0.06
-		self.lev_boost = 0.065
-
 		self.trade_count = 0
 		self.age = {}
 		self.waiting = {}
 		self.last_transaction_ID = ''
 		self.open_positions = {}
-		self.max_trade_count = 10
+		self.max_trade_count = 20
 		self.updateAccountInfo()
 		self.syncTrades()
 
+	# once program initializes, we want to retrieve account information
+	# -------------------------------------------------------------------------
 	def updateAccountInfo(self):
 		# get information about oanda account
 		r = accounts.AccountSummary(accountID=self.accountID)
@@ -60,6 +80,8 @@ class Account():
 		except V20Error as e:
 			print("V20Error:", e)
 
+	# upload oanda open positions to local memory
+	# -------------------------------------------------------------------------
 	def syncTrades(self):
 		# get information about oanda account
 		r = positions.OpenPositions(accountID=self.accountID)
@@ -81,6 +103,8 @@ class Account():
 			print("V20Error:", e)
 			exit()
 
+	# read the trade information we wrote to file to update program memory
+	# -------------------------------------------------------------------------
 	def read_from_backup(self, ID):
 		try:
 			lines = [line.rstrip('\n') for line in open('backup_trades')]
@@ -89,36 +113,48 @@ class Account():
 				ID = data[0]
 				pair = data[1]
 				frame = data[2]
+				rg = data[3]
 
-				self.addPosition(ID, pair, frame)
+				self.addPosition(ID, pair, frame, rg)
 		except FileNotFoundError as f:
-			print(f)
-			exit()
+			print("no backup present")
 
-	def end_waiting(self, str):
-
+	# retrieve the open positions we hold
+	# -------------------------------------------------------------------------
 	def openPositions(self):
 		return self.open_positions
 
-	def addPosition(self, ID, pair, frame):
-		self.open_positions[ID] = pair, frame
+	# add a position to our local memory
+	# -------------------------------------------------------------------------
+	def addPosition(self, ID, pair, frame, rg):
+		self.open_positions[ID] = pair, frame, rg
 		self.last_transaction_ID = ID
 		self.age[ID] = 0
 
-	def possible_trade(self, pair, frame):
+	# add currency pair and frame to list of possible trades to monitor
+	# -------------------------------------------------------------------------
+	def possible_trade(self, pair, frame, prediction, rg, o_slope, p_slope, obv, cycle, lev):
 		waiting_str = pair+","+frame
-		self.waiting[waiting_str] = 0 # age of possible trade
+		self.waiting[waiting_str] = [0, pair, frame, prediction, rg, lev]
 
+	# retrieve a waiting currency pair/frame object
+	# -------------------------------------------------------------------------
 	def Waiting(self):
 		return self.waiting
 
+	# remove currency pair/frame from list
+	# -------------------------------------------------------------------------
+	def end_waiting(self, w_str):
+		del self.waiting[w_str]
+
+	# retrieve account balance
+	# -------------------------------------------------------------------------
 	def getBalance(self):
 		self.updateAccountInfo()
 		return float(self.balance)
 
-	def curr_data(self, frame, pair):
-		return self.get_data(frame, pair)
-
+	# retrieve candle data with api request
+	# -------------------------------------------------------------------------
 	def get_data(self, frame, pair):
 		params = {
 	        "count": 60,          # number of candles    
@@ -148,9 +184,11 @@ class Trade():
 	# determine if we are already in this trade
 	def can_trade(self, Account, pair, frame):
 		Account.updateAccountInfo()
+		
 		trade_count = Account.trade_count
 		if trade_count >= Account.max_trade_count:
 			return False
+
 		positions = Account.openPositions()
 		for ID in positions:
 			open_pair, open_frame = positions[ID]
@@ -165,24 +203,25 @@ class Trade():
 		return True
 
 	# write to backup file in case of a program crash
-	def write_to_backup(self, ID, pair, frame):
+	# -------------------------------------------------------------------------
+	def write_to_backup(self, ID, pair, frame, rg):
 		with open('backup_trades', 'a') as backup:
-			ln = ID+", "+pair+", "+frame+"\n"
-			print("< writing", ln, "to backup")
+			ln = str(ID)+", "+pair+", "+frame+", "+str(rg)+"\n"
 			backup.write(ln)
 			backup.close()
 
 	# write to trade log ledger
+	# -------------------------------------------------------------------------
 	def trade_log(self, ID, pair, frame, stop_price):
 		with open('trade_log', 'a') as ledger:
-			ln = "Trade: ID="+ID+" | pair="+pair+" | stop_price="+stop_price+"\n"
+			ln = "Trade: ID="+str(ID)+" | pair="+pair+" | stop_price="+str(stop_price)+"\n"
 			ledger.write(ln)
 			ledger.close()
 
-	def market_trade(self, units, pair, last_price, frame):
-		print("< initializing a market trade")
-
-	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price):
+	# initialize a stop loss trade 
+	# -------------------------------------------------------------------------
+	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg):
+		
 		# define the order request
 		mktOrder = MarketOrderRequest(
     		instrument=pair,
@@ -200,14 +239,15 @@ class Trade():
 			api.request(r)
 			res = r.response
 
-			# add to open positions
+			# add ID, pair, frame, range to open positions
 			Account.addPosition(res['orderCreateTransaction']['id'], 
-				res['orderCreateTransaction']['instrument'], frame)
-			print("< order ID:", Account.last_transaction_ID)
+				res['orderCreateTransaction']['instrument'], frame, rg)
+			
+			#print("< order ID:", Account.last_transaction_ID)
 
 			# write trade to backup file
 			self.write_to_backup(res['orderCreateTransaction']['id'], 
-				res['orderCreateTransaction']['instrument'], frame)
+				res['orderCreateTransaction']['instrument'], frame, rg)
 
 			# write trade to trade log file
 			self.trade_log(res['orderCreateTransaction']['id'], pair, frame, stop_price)
@@ -217,9 +257,8 @@ class Trade():
 			print(err)
 			exit()
 
-	def take_profit_trade(self, Account, units, pair, stop_price, take_price, frame):
-		print("initializing a take profit trade")
-
+	# close the position for the given ID
+	# -------------------------------------------------------------------------
 	def close_position(self, Account, ID, close):
 		print("< closing a position for ID =", ID, ">\n")
 		r = orders.OrderCancel(accountID=Account.accountID, orderID=ID)
@@ -237,41 +276,31 @@ class Trade():
 # look for buy and selling signals then sleep 
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-	print("/////////////////////////////////////////////////////////////////////////")
-	print("// initializing forex program")
-	print("/////////////////////////////////////////////////////////////////////////\n")
 
 	ACCOUNT = Account() # get an instance of the Account class
 	TRADE = Trade()     # get an instance of the Trade class
 
-	itr = 1
-	while (True):
-		try:
+	print("/////////////////////////////////////////////////////////////////////////")
+	print("// initializing forex program")
+	print("/////////////////////////////////////////////////////////////////////////\n")
 
-			print("\n------------------------------------------------------------------------")
-			print("stream iteration", itr, "at", str(datetime.now()))
-			print("------------------------------------------------------------------------")
-			itr += 1
-			
-			for frame in ["H4", "D"]:
-				# run sub-program to find buying signals
-				find_signal(ACCOUNT, TRADE, frame) # pass frame as a parameter
+	#try:
+		
+	for frame in ["H4", "H1"]:
+		
+		# run sub-program to find buying signals
+		find_signal(ACCOUNT, TRADE, frame)
 
-			# run sub-program to find selling signals
-			manage_position(ACCOUNT, TRADE)
+	# run sub-program to find selling signals
+	manage_position(ACCOUNT, TRADE)
 
-			# program summary
-			print("< acount balance:", ACCOUNT.getBalance())
-			print("< trade count:", ACCOUNT.trade_count)
+	# program summary
+	print("< acount balance:", ACCOUNT.getBalance())
+	print("< trade count:", ACCOUNT.trade_count)
 
-			# data retrieval interval
-			sleep_time = 900 # 15 minutes
-			print("< next retrival in", sleep_time/60, "minutes")
-			time.sleep(sleep_time) # sleep until next data retrieval
-
-		except KeyboardInterrupt:
-			print("\nexiting program")
-			exit()
+	#except:
+	#	print("\n<error occured>: exiting program")
+	#	exit()
 
 
 

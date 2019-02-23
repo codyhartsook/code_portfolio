@@ -71,18 +71,16 @@ class Test():
 		self.worst_trade[0] = '', '', ''
 		
 		# find optimized leverage
-		self.lev_range = .04, .065
+		self.lev_range = {}
+		self.lev_range["H4"] = .04, .065
+		self.lev_range["H1"] = .03, .055
 		self.avg_lev = 0
-		self.leverage = {}
-		self.leverage["H1"] = 0.02
-		self.leverage["H4"] = 0.05
-		self.leverage["D"] = 0.05
 		self.lev_boost = 0.06
 		self.margin = 10000
 		self.realized_profit = 0
 
 		# data information
-		self.lookBack = 730 # 830
+		self.lookBack = 208
 		self.data = {}
 		self.begin = {}
 		self.end = {}

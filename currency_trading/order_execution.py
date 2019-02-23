@@ -5,7 +5,6 @@ import time
 import numpy as np
 from utility_funcs import StochRSI, bullish_candles, bearish_candles, ALMA, RSI, MACD, OBV, NATR
 
-
 def manage_position(Account, Trade):
 
 	# utility function
@@ -20,8 +19,8 @@ def manage_position(Account, Trade):
 
 	# convert range of prediction 
 	# -------------------------------------------------------------------------
-	def transform(weight):
-		mn, mx = Account.lev_range
+	def transform(weight, frame):
+		mn, mx = Account.lev_range[frame]
 		
 		OldRange = (1.0 - 0.4)
 		NewRange = (mx - mn)
@@ -80,7 +79,7 @@ def manage_position(Account, Trade):
 						candle = True
 
 					# define the leverage based of prediction weight
-					leverage = transform(weight)
+					leverage = transform(weight, frame)
 					Account.avg_lev += leverage
 					# if we found reversal candle, increase leverage slightly
 					if candle:
@@ -133,8 +132,7 @@ def manage_position(Account, Trade):
 			prediction = Account.H4_SELL_model.predict(pred_data)
 
 
-		if prediction < 0.5:
-		#if (aF[-1] < aS[-1] and stF[-1] < stS[-1]):
+		if prediction < 0.5 and (aF[-1] < aS[-1] and stF[-1] < stS[-1]):
 			closed = close_pos(ID, close)
 		return 1
 

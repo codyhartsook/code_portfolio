@@ -29,7 +29,7 @@ def find_signal(Account, Trade, Frame):
 			obv = np.array(OBV[begin:end])
 
 			if frame == "H1":
-				level = 0.10
+				level = 0.05
 			elif frame == "H4":
 				level = 0.15
 
@@ -44,7 +44,7 @@ def find_signal(Account, Trade, Frame):
 				rang = end - begin
 
 				if frame == "H1":
-					price_diff = 1.0
+					price_diff = 0.65
 				elif frame == "H4":
 					price_diff = 1.06
 
