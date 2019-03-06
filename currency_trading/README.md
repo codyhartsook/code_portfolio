@@ -9,6 +9,7 @@ python3
 numpy  
 pandas  
 talib (python wrapper for talib)  
+Keras  
 oandaV20  
 
 Description
