@@ -55,6 +55,7 @@ class Test():
 		self.ml_waiting = {}
 		self.ml_data = {}      # ml data for all orders, contains label if order ended in profit
 		self.waiting_len = 0
+		self.bear_len = 0
 		self.stopped = 0
 		self.mv_stopped = 0
 		self.obv_slope = np.array([])
@@ -80,7 +81,7 @@ class Test():
 		self.realized_profit = 0
 
 		# data information
-		self.lookBack = 208
+		self.lookBack = 730
 		self.data = {}
 		self.begin = {}
 		self.end = {}
@@ -189,9 +190,9 @@ class Test():
 	def openPositions(self):
 		return self.open_positions
 
-	def possible_trade(self, pair, frame, prediction, rg, o_slope, p_slope, obv, cycle, lev):
+	def possible_trade(self, pair, frame, sig_type, prediction, rg, o_slope, p_slope, obv, cycle, lev):
 		waiting_str = pair+","+frame
-		self.waiting[waiting_str] = [0, pair, frame, prediction, rg, lev]
+		self.waiting[waiting_str] = [0, pair, frame, sig_type, prediction, rg, lev]
 		self.waiting_len += 1
 
 	def Waiting(self):
@@ -203,21 +204,22 @@ class Test():
 
 	# interacts with find_signals
 	# see if we already have the trade
-	def can_trade(self, Account, pair, frame):
+	def can_trade(self, Account, pair, frame, sig_type):
 		trade_count = self.trade_count
 		if trade_count >= self.max_trade_count:
 			return False
 
 		positions = self.openPositions()
 		for ID in positions:
-			open_pair, open_frame, rg = positions[ID]
+			open_pair, open_frame, pos_type, rg = positions[ID]
 			
 			open_pair = open_pair.strip()
 			open_frame = open_frame.strip()
 			pair = pair.strip()
 			frame = frame.strip()
 
-			if open_pair==pair and open_frame==frame:
+
+			if open_pair==pair and open_frame==frame and sig_type == pos_type:
 				return False
 		return True
 
@@ -229,7 +231,7 @@ class Test():
 	# set the stop price for pair: stops[pair] = stop_price
 	# set open_positions[pair] = ID, frame: generate ID, last_ID+1
 	# update balance
-	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg):
+	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg, sig_type):
 		ID = self.last_ID + 1
 		self.last_ID += 1
 
@@ -237,7 +239,7 @@ class Test():
 		#self.ml_data[ID] = np.insert(self.ml_data[ID], 0, ID, axis=0)
 
 		self.trades[ID] = last_price, units
-		self.open_positions[ID] = pair, frame, rg
+		self.open_positions[ID] = pair, frame, sig_type, rg
 		self.stops[ID] = stop_price
 		self.trade_count += 1
 		self.total_trades += 1
@@ -251,6 +253,7 @@ class Test():
 		print("< BUY ORDER:------------------------------------------------")
 		print("< trade placed at", time[-1])
 		print("< pair:", pair, " -- frame:", frame)
+		print("< long/short:", sig_type)
 		print("< order price:", last_price)
 		print("< stop_price:", stop_price)
 		print("------------------------------------------------------------")
@@ -261,22 +264,22 @@ class Test():
 	# manage all stop losses
 	def manage_stops(self):
 		for ID in list(self.open_positions):
-			pair, frame, rg = self.open_positions[ID]
+			pair, frame, sig_type, rg = self.open_positions[ID]
 			stop_p = self.stops[ID]
 			end_interval = self.end[frame]-1
 			close, low, high, op, vol, time = self.data[pair]
 			curr_p = close[end_interval]
 
 			if curr_p <= stop_p:
-				self.close_position(self, ID, curr_p)
+				self.close_position(self, ID, pair, frame, curr_p, sig_type)
 				self.stopped += 1
 
 	# interacts with manage_positions
 	# add to realized profit by calling update profit
 	# delete positions[pair], trades[pair], stops[pair]
-	def close_position(self, Account, ID, last_price):
+	def close_position(self, Account, ID, pair, frame, last_price, pos_type):
 		
-		pair, frame, rg = self.open_positions[ID]
+		pair, frame, pos_type, rg = self.open_positions[ID]
 		time, vol, op, high, low, close = self.get_data(frame, pair)
 
 		if last_price != close[-1]:
@@ -286,9 +289,16 @@ class Test():
 		val1 = b_price*units
 		val2 = last_price*units
 
-		self.realized_profit += (val2-val1) # add to profit, could be negative
+		# long position
+		if pos_type == 1:
+			self.realized_profit += (val2-val1) # add to profit, could be negative
+			self.balance += (val2-val1)
+		# short position
+		else:
+			self.realized_profit = (val1-val2)
+			self.balance += (val1-val2)
+
 		self.trade_count -= 1
-		self.balance += (val2-val1)
 		self.margin = self.balance
 		self.mv_stopped += 1
 
@@ -296,7 +306,9 @@ class Test():
 			self.min_balance_reached = self.balance
 			self.low = self.total_trades
 
-		if (val2-val1) < 0:
+		if (val2-val1) < 0 and pos_type == 1:
+			self.losing_tades[ID] = time[-1], pair, frame
+		elif (val1 - val2) < 0 and pos_type == 0:
 			self.losing_tades[ID] = time[-1], pair, frame
 
 		print("< CLOSE ORDER:----------------------------------------------")
@@ -346,7 +358,7 @@ class Test():
 		pos_val = 0
 		for ID in list(self.open_positions):
 			#print("open position")
-			pair, frame, rg = self.open_positions[ID]
+			pair, frame, pos_type, rg = self.open_positions[ID]
 			close, low, high, op, vol, time = self.data[pair]
 			last_price = close[-1]
 
@@ -360,6 +372,7 @@ class Test():
 		print("Stopped trades:", self.stopped)
 		print("Closed trades:", self.mv_stopped)
 		print("Number of possible trades:", self.waiting_len)
+		print("bear signals:", self.bear_len)
 		print("Min account balance:", self.min_balance_reached)
 		print("Reached after", self.low, "trades")
 		print("Negative trade count:", len(self.losing_tades))

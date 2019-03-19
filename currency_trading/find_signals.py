@@ -33,6 +33,7 @@ def find_signal(Account, Trade, Frame):
 			elif frame == "H4":
 				level = 0.15
 
+			# find bullish breakout situation
 			sig, lev = dual_troughs(pr, level)
 			if sig:
 				
@@ -69,9 +70,52 @@ def find_signal(Account, Trade, Frame):
 					if prediction > 0.5:
 
 						# this is a candadate for a trade
-						Account.possible_trade(pair, frame, prediction, rang, o_slope, p_slope, obv[-1], 
+						sig_type = 1 # this is a long trade
+						Account.possible_trade(pair, frame, sig_type, prediction, rang, o_slope, p_slope, obv[-1], 
 								cycle_change, lev)
 						return True, 1, 1
+
+			# find bearish breakout situation
+			"""sig, lev = dual_peaks(pr, level)
+			if sig:
+
+				p_slope = slope(pr)           # slope of price
+				o_slope = slope(obv)          # slope of obv
+				rsi = RSI(pr)                 # rsi of price
+				natr = NATR(high, low, close) # volatility
+				cycle_change = swing(close)   # price cycle range
+				rang = end - begin
+
+				if frame == "H1":
+					price_diff = 0.65
+				elif frame == "H4":
+					price_diff = 1.06
+
+				if (cycle_change < price_diff) and (o_slope < 0):
+					# add data to possible breakout
+					pred_data = np.array([[rang, high[-1], low[-1], close[-1],
+							close[len(close)-2], close[len(close)-3], lev, o_slope, 
+							p_slope, obv[-1], obv[len(obv)-2], obv[len(obv)-3], 
+							rsi[-1], rsi[len(rsi)-2], rsi[len(rsi)-3], natr[-1],
+							cycle_change]])
+
+					# scale the data with the same scaler used in training
+					# make a prediction using the ml model
+					if frame == "H1":
+						preddata = Account.H1_bear_BR_scaler.transform(pred_data)
+						prediction = Account.H1_bear_BR_model.predict(preddata)
+					elif frame == "H4":
+						preddata = Account.H4_bear_BR_scaler.transform(pred_data)
+						prediction = Account.H4_bear_BR_model.predict(preddata)
+
+					if prediction > 0.5:
+
+						# this is a candadate for a trade
+						sig_type = 0 # this is a short trade
+						Account.possible_trade(pair, frame, sig_type, prediction, rang, o_slope, p_slope, obv[-1], 
+								cycle_change, lev)
+						return True, 1, 1"""
+
 
 	# compute the slope using np.polyfit with order 1
 	def slope(y):
@@ -108,11 +152,6 @@ def find_signal(Account, Trade, Frame):
 
 		return delta
 
-	# determine of price is in a trough for given interval
-	def trough(close):
-		mn = min(close)
-		return (mn==close[-1])
-
 	# find dual troughs: right now dont care which trough is lower
 	# this will ensure that there is support for the trade
 	# we also want to make sure that there is price change between the lows
@@ -131,7 +170,6 @@ def find_signal(Account, Trade, Frame):
 				first = close[i]
 				f_index = i
 
-		    # If arr[i] is in between first and second then 
 		    # update second 
 			elif (close[i] < second and close[i] != first): 
 				second = close[i]
@@ -157,6 +195,50 @@ def find_signal(Account, Trade, Frame):
 		
 		return False, 0
 
+	# find dual peaks for current price and range back
+	def dual_peaks(close, level):
+		cl_len = len(close)
+
+		first = second = 0 # max, 2nd max = value < any currency
+		f_index = s_index = 0
+
+		for i in range(0, cl_len): 
+  
+		    # If current element is smaller than first then 
+		    # update both first and second 
+			if close[i] > first: 
+				second = first 
+				first = close[i]
+				f_index = i
+
+		    # update second 
+			elif (close[i] > second and close[i] != first): 
+				second = close[i]
+				s_index = i
+
+		if (first == close[-1] or second == close[-1]):
+			
+			T_diff = first - second
+			T_delta = (T_diff / second) * 100
+
+			interval = close
+			if f_index > s_index:
+				interval = close[s_index:f_index]
+			else:
+				interval = close[f_index:s_index]
+
+			min_ = min(interval)
+			I_diff = ((first + second) / 2) - min_
+			I_delta = (I_diff / ((first + second) / 2)) * 100
+
+			#print("I_delta ", I_delta)
+			#print("T_delta ", T_delta)
+			#print("level ", level)
+			if I_delta > level and T_delta < level:
+				return True, second
+		
+		return False, 0
+
 	# execution starts here
 	# -----------------------------------------------------------------------------
 	# oanda account
@@ -175,16 +257,21 @@ def find_signal(Account, Trade, Frame):
 	for pair in pair_list:
 
 		# get api data
-		time, vol, op, high, low, close = Account.get_data(Frame, pair)
+		try:
+			time, vol, op, high, low, close = Account.get_data(Frame, pair)
 
-		if close.size == 0:
-			break
-		
-		# get statistics
-		obv = OBV(close, vol)
+			if close.size == 0:
+				break
+			
+			# get statistics
+			obv = OBV(close, vol)
 
-		# find slopes and divergencies
-		find_sig(high, low, close, obv, pair, Frame)
+			# find slopes + divergencies and make prediction
+			find_sig(high, low, close, obv, pair, Frame)
+
+		except Exception as error:
+			print("error caught in find_signals:", error)
+			raise Exception("get_data threw an Exception")
 
 
 
