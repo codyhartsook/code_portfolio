@@ -12,6 +12,8 @@ import oandapyV20.endpoints.instruments as instruments
 import oandapyV20
 import numpy as np
 import argparse
+from dateutil import rrule
+from datetime import datetime, timedelta
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -76,16 +78,18 @@ class Test():
 		self.lev_range["H4"] = .04, .065
 		self.lev_range["H1"] = .03, .055
 		self.avg_lev = 0
+		self.avg_age = 0
 		self.lev_boost = 0.06
 		self.margin = 10000
 		self.realized_profit = 0
 
 		# data information
-		self.lookBack = 730
+		self.lookBack = 0
 		self.data = {}
 		self.begin = {}
 		self.end = {}
 		self.init_interval()
+		#self.api_date_range_data("H4")
 
 	
 	# class methods
@@ -118,51 +122,82 @@ class Test():
 			time, vol, op, high, low, close = build_df(r)
 			self.data[pair] = close, low, high, op, vol, time # hashtable with key=pair, val=candle data
 
-	def api_date_range_data(self, frame):
+	def datespan(self, startDate, endDate, frame):
+		
+		delta=timedelta(days=1)
+		currentDate = startDate
+		while currentDate < endDate:
+			yield currentDate
+			currentDate += delta
 
-		Time = np.array([])
-		Vol = np.array([])
-		Opin = np.array([])
-		High = np.array([])
-		Low = np.array([])
-		Close = np.array([])
+	def duplicate_check(self, pair, Close, Low, High, Opin, Vol, Time):
+		last = ""
+		to_del = []
+		for idx in range(len(Time)):
+			if Time[idx] == last:
+				to_del.append(idx)
+			else:
+				last = Time[idx]
+
+		for idx in to_del:
+			np.delete(Close, idx)
+			np.delete(Low, idx)
+			np.delete(High, idx)
+			np.delete(Opin, idx)
+			np.delete(Vol, idx)
+			np.delete(Time, idx)
+
+		self.data[pair] = Close, Low, High, Opin, Vol, Time
+		self.lookBack = len(Close)
+
+
+
+	def api_date_range_data(self, frame):
 
 		print("< retrieving data, this may take a minute")
 		for pair in self.pair_list:
-			year = 2017
-			month = -1
-			dat = '01T00'
-			for date_range in range(0, 12):
 
-				if month == 12: 
-					month = 2
-					year += 1
-				elif month == 11:
-					month = 1
-					year += 1
-				else: 
-					month += 2
+			Time = np.array([])
+			Vol = np.array([])
+			Opin = np.array([])
+			High = np.array([])
+			Low = np.array([])
+			Close = np.array([])
+			
+			dat = 'T00:00'
+			period = 0
+			start = ""
+			for timestamp in self.datespan(datetime(2017, 3, 20, 6, 0), datetime(2019, 3, 20, 6, 0), frame):
+				if period == 0:
+					start = timestamp
+				elif period >= 82:
+					b = str(start).split(" ")[0]+dat
+					e = str(timestamp).split(" ")[0]+dat
+					print(b, " - ", e)
 
-				date_begin = str(year)+'-'+str(month)+'-'+dat # our start date
-
-				params = {
-					"from": date_begin,
-					"count": 360,
+					# request data
+					params = {
+					"from": b,
+					"to": e,
 					"granularity": frame}
 
-				r = instruments.InstrumentsCandles(instrument=pair, params=params)
-				self.client.request(r)
+					r = instruments.InstrumentsCandles(instrument=pair, params=params)
+					self.client.request(r)
 
-				time, vol, op, high, low, close = build_df(r)
-				Time = np.append(Time, time)
-				Vol = np.append(Vol, vol)
-				Opin = np.append(Opin, op)
-				High = np.append(High, high)
-				Low = np.append(Low, low)
-				Close = np.append(Close, close)
+					time, vol, op, high, low, close = build_df(r)
+					Time = np.append(Time, time)
+					Vol = np.append(Vol, vol)
+					Opin = np.append(Opin, op)
+					High = np.append(High, high)
+					Low = np.append(Low, low)
+					Close = np.append(Close, close)
 
-			self.data[pair] = Close, Low, High, Opin, Vol, Time
-		print("< complete")
+					self.duplicate_check(pair, Close, Low, High, Opin, Vol, Time)
+					#self.data[pair] = Close, Low, High, Opin, Vol, Time
+					start = timestamp
+					period = 0
+				period += 1
+			print(len(Close))
 	
 	# interacts with find_signals
 	def get_data(self, frame, pair):
@@ -288,6 +323,7 @@ class Test():
 		b_price, units = self.trades[ID]
 		val1 = b_price*units
 		val2 = last_price*units
+		self.avg_age += self.age[ID]
 
 		# long position
 		if pos_type == 1:
@@ -374,6 +410,7 @@ class Test():
 		print("Number of possible trades:", self.waiting_len)
 		print("bear signals:", self.bear_len)
 		print("Min account balance:", self.min_balance_reached)
+		print("avg age:", self.avg_age / self.total_trades)
 		print("Reached after", self.low, "trades")
 		print("Negative trade count:", len(self.losing_tades))
 		print("average leverage:", self.avg_lev / self.total_trades)
@@ -409,7 +446,8 @@ if __name__ == "__main__":
 	if chart_time == "H1":
 		# run backtest for highest frequency chart time
 		print("< running backtest on H1 candles")
-		TEST.api_data("H1")               # update the price data 
+		#TEST.api_data("H1")  
+		TEST.api_date_range_data("H1")              # update the price data 
 		length = (TEST.lookBack*24 - 60)  # hourly candles * 24 to get day
 		for itr in range(0, length):
 			find_signal(TEST, TEST, "H1") # pass frame as parameter
@@ -424,8 +462,9 @@ if __name__ == "__main__":
 	elif chart_time == "H4":
 		# run backtsest for medium frequency chart time
 		print("< running backtest on H4 candles")
-		TEST.api_data("H4")               # update the price data
-		length = (TEST.lookBack*6 - 60)  # 4 hour candles * 6 to get day
+		#TEST.api_data("H4")
+		TEST.api_date_range_data("H4")               # update the price data
+		length = (TEST.lookBack - 60)  # 4 hour candles * 6 to get day
 		print("< number of candles:", length, "\n")
 		for itr in range(0, length):
 			find_signal(TEST, TEST, "H4") # pass frame as parameter

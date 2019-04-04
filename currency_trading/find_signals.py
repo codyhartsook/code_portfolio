@@ -71,7 +71,7 @@ def find_signal(Account, Trade, Frame):
 
 						# this is a candadate for a trade
 						sig_type = 1 # this is a long trade
-						Account.possible_trade(pair, frame, sig_type, prediction, rang, o_slope, p_slope, obv[-1], 
+						Account.possible_trade(pair, frame, prediction, rang, o_slope, p_slope, obv[-1], 
 								cycle_change, lev)
 						return True, 1, 1
 

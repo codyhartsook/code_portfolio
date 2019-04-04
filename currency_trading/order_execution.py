@@ -56,57 +56,55 @@ def manage_position(Account, Trade):
 		elif frame == "H4" and sig_type == 0:
 			STOP_LOSS = min(((last_price*1.15), max_price*1.08))
 
-		try:
-			# call order function from main module
-			Trade.stop_loss_trade(Account, units, pair, STOP_LOSS, frame, last_price, rg, sig_type)
-		except Exception as error:
-			print("stop_loss_trade threw an Exception:", error)
-			raise Exception("buy() throwing an exception")
+		# call order function from main module
+		Trade.stop_loss_trade(Account, units, pair, STOP_LOSS, frame, last_price, rg, sig_type)
 
 	# determine if we should place an order on a waiting pair
 	# -------------------------------------------------------------------------
 	def buy_sig(weight, op, high, low, close, lev, pair, frame, rg, sig_type):
 		orders = 0
 
-		if frame=="H4":
-			rsi_level = 55
-		else:
-			rsi_level = 55
+		# bullish order
+		if sig_type == 1:
 
-		# determine if a buy signal is met
-		fastk, fastd = StochRSI(close)
-		signal = False
-		if ((fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1])) and sig_type == 1:
-			signal = True
-		elif ((fastk[-1] < fastd[-1]) and (fastk[-1] > rsi_level and close[-1])) and sig_type == 0:
-			signal = True
+			if frame=="H4":
+				rsi_level = 55
+			else:
+				rsi_level = 55
 
-		if signal:
+			fastk, fastd = StochRSI(close)
+			signal = False
+			if ((fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1])) and sig_type == 1:
+				signal = True
+			elif ((fastk[-1] < fastd[-1]) and (fastk[-1] > rsi_level and close[-1])) and sig_type == 0:
+				signal = True
 
-			if Trade.can_trade(Account, pair, frame, sig_type):
-				Balance = Account.getBalance()
-				
-				# we are ready to make a trade
-				if Balance > 0:
-					orders = 1
+			if signal:
 
-					# see if there was a bullish candle present
-					candle = False
-					hammer, engulf, pierce = bullish_candles(op, high, low, close)
-					if hammer[-1] > 0 or engulf[-1] > 0 or pierce[-1] > 0 and sig_type == 1:
-						candle = True
+				if Trade.can_trade(Account, pair, frame, sig_type):
+					Balance = Account.getBalance()
+					
+					# we are ready to make a trade
+					if Balance > 0:
+						orders = 1
 
-					# define the leverage based of prediction weight
-					leverage = transform(weight, frame)
-					Account.avg_lev += leverage
-					# if we found reversal candle, increase leverage slightly
-					if candle:
-						trade_value = (Balance*Account.lev_boost*50)
-					else:
-						trade_value = (Balance*leverage)*50
+						# see if there was a bullish candle present
+						candle = False
+						hammer, engulf, pierce = bullish_candles(op, high, low, close)
+						if hammer[-1] > 0 or engulf[-1] > 0 or pierce[-1] > 0:
+							candle = True
 
-					units = trade_value/close[-1]
-					buy(units, pair, frame, close, lev, rg, sig_type)
+						# define the leverage based of prediction weight
+						leverage = transform(weight, frame)
+						Account.avg_lev += leverage
+						# if we found reversal candle, increase leverage slightly
+						if candle:
+							trade_value = (Balance*Account.lev_boost*50)
+						else:
+							trade_value = (Balance*leverage)*50
+
+						units = trade_value/close[-1]
+						buy(units, pair, frame, close, lev, rg, sig_type)
 		
 		return orders
 
@@ -114,21 +112,21 @@ def manage_position(Account, Trade):
 	# -------------------------------------------------------------------------
 	def close_sig(op, high, low, close, pair, frame, ID, rg, pos_type):
 
-		if Account == Trade:
-				age_acc = 1
-		else:
-			if frame == "H1":
-				age_acc = (24 / Account.data_poll)
-			elif frame == "H4":
-				age_acc = (6 / Account.data_poll)
-	
-		Account.age[ID] += age_acc
-
 		# let trade develop
 		if Account.age[ID] < (rg - 20):
+			
+			# differentiate between backtest and real program
+			if Account == Trade:
+				age_acc = 1
+			else:
+				if frame == "H1":
+					age_acc = (24 / Account.data_poll)
+				elif frame == "H4":
+					age_acc = (6 / Account.data_poll)
+	
+			Account.age[ID] += age_acc
 			return 0
 
-		# collect data for model prediction
 		rsi = RSI(close)
 		obv = OBV(close, vol)
 		natr = NATR(high, low, close)
@@ -141,48 +139,25 @@ def manage_position(Account, Trade):
 		ta_data = [close, obv, rsi, aF, aS, stF, stS, natr]
 		pred_data = flatten(ta_data)
 
-		# close long positions
-		if pos_type == 1:
-			if frame == "H1":
-				pred_data = Account.H1_SELL_scaler.transform(pred_data)
-				prediction = Account.H1_SELL_model.predict(pred_data)
+		if frame == "H1":
+			pred_data = Account.H1_SELL_scaler.transform(pred_data)
+			prediction = Account.H1_SELL_model.predict(pred_data)
 
-			elif frame == "H4":
-				pred_data = Account.H4_SELL_scaler.transform(pred_data)
-				prediction = Account.H4_SELL_model.predict(pred_data)
-
-			# close positions if necessary
-			if prediction < 0.5 and (aF[-1] < aS[-1] and stF[-1] < stS[-1]):# and Account.age[ID] < rg:
-				closed = close_pos(ID, pair, frame, close, 0, pos_type)
-
-			# if age is past range, just look at statistics
-			#elif (aF[-1] < aS[-1] and stF[-1] < stS[-1]):
-			#	closed = close_pos(ID, pair, frame, close, 0, pos_type)
-
-		# close short positions
-		elif pos_type == 0:
-			#if frame == "H4":
-			if aF[-1] >= aS[-1] and stF[-1] >= stS[-1]:
-				closed = close_pos(ID, pair, frame, close, 0, pos_type)
+		elif frame == "H4":
+			pred_data = Account.H4_SELL_scaler.transform(pred_data)
+			prediction = Account.H4_SELL_model.predict(pred_data)
 
 
+		if prediction < 0.5 and (aF[-1] < aS[-1] and stF[-1] < stS[-1]):
+			closed = close_pos(ID, pair, frame, close, 0, pos_type)
 		return 1
 
 	# close a position for given pair
 	# -------------------------------------------------------------------------
 	def close_pos(ID, pair, frame, close, atempts, pos_type):
-		try:
-			success = Trade.close_position(Account, ID, pair, frame, close[-1], pos_type)
-		except Exception as error:
-			if atempts > 5:
-				raise Exception("close_pos has not completed order after atempts:")
-			else:
-				buffer_time = 10       
-				time.sleep(buffer_time) # wait 10 seconds
-				atempts += 1
-				close_pos(ID, pair, frame, close, atempts, pos_type)  # make recursive call to close position
+		success = Trade.close_position(Account, ID, pair, frame, close[-1], pos_type)
 
-		return 1
+		return success
 
 	# -------------------------------------------------------------------------
 	# see if we need to close any positions
@@ -193,20 +168,15 @@ def manage_position(Account, Trade):
 	close = []
 
 	for ID in list(positions):
-		pair, frame, pos_type, rg = positions[ID]
+		pair, frame, rg = positions[ID]
+		pos_type = 0
 		
-		try:
-			time, vol, op, high, low, close = Account.get_data(frame, pair)
-		except Exception as error:
-			raise Exception("order_execution/get_data throwing Exception:", error)
+		time, vol, op, high, low, close = Account.get_data(frame, pair)
 
 		if vol.size == 0:
 			continue
 	
-		try:
-			closed += close_sig(op, high, low, close, pair, frame, ID, rg, pos_type)
-		except Exception as error:
-			raise Exception("order_execution/close_sig throwing Exception:", error)
+		closed += close_sig(op, high, low, close, pair, frame, ID, rg, pos_type)
 
 	# -------------------------------------------------------------------------
 	# see if there was a trigger hit
@@ -238,18 +208,13 @@ def manage_position(Account, Trade):
 		if age < 3:
 			Account.waiting[key_str][0] += age_acc # add to age
 		
-			try:
-				time, vol, op, high, low, close = Account.get_data(frame, pair)
-			except Exception as error:
-				raise Exception("order_execution/get_data throwing Exception:", error)
-
+			time, vol, op, high, low, close = Account.get_data(frame, pair)
+			
 			if vol.size == 0:
 				continue
-			try:
-				orders += buy_sig(weight, op, high, low, close, lev, pair, frame, rg, sig_type)
-			except Exception as error:
-				raise Exception("order_execution/buy_sig throwing Exception:", error)
-		
+
+			orders += buy_sig(weight, op, high, low, close, lev, pair, frame, rg, sig_type)
+			
 		else:
 			Account.end_waiting(key_str)
 
