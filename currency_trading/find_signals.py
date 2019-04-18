@@ -231,9 +231,6 @@ def find_signal(Account, Trade, Frame):
 			I_diff = ((first + second) / 2) - min_
 			I_delta = (I_diff / ((first + second) / 2)) * 100
 
-			#print("I_delta ", I_delta)
-			#print("T_delta ", T_delta)
-			#print("level ", level)
 			if I_delta > level and T_delta < level:
 				return True, second
 		

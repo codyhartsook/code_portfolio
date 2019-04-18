@@ -12,11 +12,26 @@ import oandapyV20.endpoints.instruments as instruments
 import oandapyV20
 import numpy as np
 import argparse
-from dateutil import rrule
-from datetime import datetime, timedelta
-
+import os
+import logging
 import warnings
 warnings.filterwarnings("ignore")
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+formatter = logging.Formatter('%(levelname)s - %(message)s')
+def setup_logger(name, log_file, level=logging.INFO):
+
+    handler = logging.FileHandler(log_file)        
+    handler.setFormatter(formatter)
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.addHandler(handler)
+
+    return logger
+
+# general process logger
+logger = setup_logger('first_logger', 'back_test.log')
 
 # -----------------------------------------------------------------------------
 # class Test
@@ -50,14 +65,13 @@ class Test():
 
 		# position and trade information
 		self.open_positions = {} # keep track of open positions
+		self.prediction = {}
 		self.trades = {}         # more specific to trade values
 		self.stops = {}          # stop price for given order ID
-		self.age = {}
 		self.waiting = {}
 		self.ml_waiting = {}
 		self.ml_data = {}      # ml data for all orders, contains label if order ended in profit
 		self.waiting_len = 0
-		self.bear_len = 0
 		self.stopped = 0
 		self.mv_stopped = 0
 		self.obv_slope = np.array([])
@@ -78,18 +92,16 @@ class Test():
 		self.lev_range["H4"] = .04, .065
 		self.lev_range["H1"] = .03, .055
 		self.avg_lev = 0
-		self.avg_age = 0
 		self.lev_boost = 0.06
 		self.margin = 10000
 		self.realized_profit = 0
 
 		# data information
-		self.lookBack = 0
+		self.lookBack = 730
 		self.data = {}
 		self.begin = {}
 		self.end = {}
 		self.init_interval()
-		#self.api_date_range_data("H4")
 
 	
 	# class methods
@@ -122,82 +134,51 @@ class Test():
 			time, vol, op, high, low, close = build_df(r)
 			self.data[pair] = close, low, high, op, vol, time # hashtable with key=pair, val=candle data
 
-	def datespan(self, startDate, endDate, frame):
-		
-		delta=timedelta(days=1)
-		currentDate = startDate
-		while currentDate < endDate:
-			yield currentDate
-			currentDate += delta
-
-	def duplicate_check(self, pair, Close, Low, High, Opin, Vol, Time):
-		last = ""
-		to_del = []
-		for idx in range(len(Time)):
-			if Time[idx] == last:
-				to_del.append(idx)
-			else:
-				last = Time[idx]
-
-		for idx in to_del:
-			np.delete(Close, idx)
-			np.delete(Low, idx)
-			np.delete(High, idx)
-			np.delete(Opin, idx)
-			np.delete(Vol, idx)
-			np.delete(Time, idx)
-
-		self.data[pair] = Close, Low, High, Opin, Vol, Time
-		self.lookBack = len(Close)
-
-
-
 	def api_date_range_data(self, frame):
+
+		Time = np.array([])
+		Vol = np.array([])
+		Opin = np.array([])
+		High = np.array([])
+		Low = np.array([])
+		Close = np.array([])
 
 		print("< retrieving data, this may take a minute")
 		for pair in self.pair_list:
+			year = 2017
+			month = -1
+			dat = '01T00'
+			for date_range in range(0, 12):
 
-			Time = np.array([])
-			Vol = np.array([])
-			Opin = np.array([])
-			High = np.array([])
-			Low = np.array([])
-			Close = np.array([])
-			
-			dat = 'T00:00'
-			period = 0
-			start = ""
-			for timestamp in self.datespan(datetime(2017, 3, 20, 6, 0), datetime(2019, 3, 20, 6, 0), frame):
-				if period == 0:
-					start = timestamp
-				elif period >= 82:
-					b = str(start).split(" ")[0]+dat
-					e = str(timestamp).split(" ")[0]+dat
-					print(b, " - ", e)
+				if month == 12: 
+					month = 2
+					year += 1
+				elif month == 11:
+					month = 1
+					year += 1
+				else: 
+					month += 2
 
-					# request data
-					params = {
-					"from": b,
-					"to": e,
+				date_begin = str(year)+'-'+str(month)+'-'+dat # our start date
+
+				params = {
+					"from": date_begin,
+					"count": 360,
 					"granularity": frame}
 
-					r = instruments.InstrumentsCandles(instrument=pair, params=params)
-					self.client.request(r)
+				r = instruments.InstrumentsCandles(instrument=pair, params=params)
+				self.client.request(r)
 
-					time, vol, op, high, low, close = build_df(r)
-					Time = np.append(Time, time)
-					Vol = np.append(Vol, vol)
-					Opin = np.append(Opin, op)
-					High = np.append(High, high)
-					Low = np.append(Low, low)
-					Close = np.append(Close, close)
+				time, vol, op, high, low, close = build_df(r)
+				Time = np.append(Time, time)
+				Vol = np.append(Vol, vol)
+				Opin = np.append(Opin, op)
+				High = np.append(High, high)
+				Low = np.append(Low, low)
+				Close = np.append(Close, close)
 
-					self.duplicate_check(pair, Close, Low, High, Opin, Vol, Time)
-					#self.data[pair] = Close, Low, High, Opin, Vol, Time
-					start = timestamp
-					period = 0
-				period += 1
-			print(len(Close))
+			self.data[pair] = Close, Low, High, Opin, Vol, Time
+		print("< complete")
 	
 	# interacts with find_signals
 	def get_data(self, frame, pair):
@@ -220,14 +201,19 @@ class Test():
 		self.begin[frame] += 1
 		self.end[frame] += 1
 
+	def set_age(self, ID, delta):
+		pair, frame, rg, age = self.open_positions[ID]
+
+		self.open_positions[ID] = pair, frame, rg, (age + delta)
+
 	# intacts with manage_positions
 	# return hashtable of open positions
 	def openPositions(self):
 		return self.open_positions
 
-	def possible_trade(self, pair, frame, sig_type, prediction, rg, o_slope, p_slope, obv, cycle, lev):
+	def possible_trade(self, pair, frame, prediction, rg, o_slope, p_slope, obv, cycle, lev):
 		waiting_str = pair+","+frame
-		self.waiting[waiting_str] = [0, pair, frame, sig_type, prediction, rg, lev]
+		self.waiting[waiting_str] = [0, pair, frame, prediction, rg, lev]
 		self.waiting_len += 1
 
 	def Waiting(self):
@@ -239,22 +225,21 @@ class Test():
 
 	# interacts with find_signals
 	# see if we already have the trade
-	def can_trade(self, Account, pair, frame, sig_type):
+	def can_trade(self, Account, pair, frame):
 		trade_count = self.trade_count
 		if trade_count >= self.max_trade_count:
 			return False
 
 		positions = self.openPositions()
 		for ID in positions:
-			open_pair, open_frame, pos_type, rg = positions[ID]
+			open_pair, open_frame, rg, age = positions[ID]
 			
 			open_pair = open_pair.strip()
 			open_frame = open_frame.strip()
 			pair = pair.strip()
 			frame = frame.strip()
 
-
-			if open_pair==pair and open_frame==frame and sig_type == pos_type:
+			if open_pair==pair and open_frame==frame:
 				return False
 		return True
 
@@ -266,15 +251,13 @@ class Test():
 	# set the stop price for pair: stops[pair] = stop_price
 	# set open_positions[pair] = ID, frame: generate ID, last_ID+1
 	# update balance
-	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg, sig_type):
+	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg):
 		ID = self.last_ID + 1
 		self.last_ID += 1
 
-		#self.ml_data[ID] = self.ml_waiting[pair+","+frame]
-		#self.ml_data[ID] = np.insert(self.ml_data[ID], 0, ID, axis=0)
-
 		self.trades[ID] = last_price, units
-		self.open_positions[ID] = pair, frame, sig_type, rg
+		self.open_positions[ID] = pair, frame, rg, 0
+		self.prediction[ID] = 1
 		self.stops[ID] = stop_price
 		self.trade_count += 1
 		self.total_trades += 1
@@ -288,33 +271,31 @@ class Test():
 		print("< BUY ORDER:------------------------------------------------")
 		print("< trade placed at", time[-1])
 		print("< pair:", pair, " -- frame:", frame)
-		print("< long/short:", sig_type)
 		print("< order price:", last_price)
 		print("< stop_price:", stop_price)
 		print("------------------------------------------------------------")
 
 		self.margin = (self.balance - (units*last_price)/50)
-		self.age[ID] = 0
 
 	# manage all stop losses
 	def manage_stops(self):
 		for ID in list(self.open_positions):
-			pair, frame, sig_type, rg = self.open_positions[ID]
+			pair, frame, rg, age = self.open_positions[ID]
 			stop_p = self.stops[ID]
 			end_interval = self.end[frame]-1
 			close, low, high, op, vol, time = self.data[pair]
 			curr_p = close[end_interval]
 
 			if curr_p <= stop_p:
-				self.close_position(self, ID, pair, frame, curr_p, sig_type)
+				self.close_position(self, ID, curr_p)
 				self.stopped += 1
 
 	# interacts with manage_positions
 	# add to realized profit by calling update profit
 	# delete positions[pair], trades[pair], stops[pair]
-	def close_position(self, Account, ID, pair, frame, last_price, pos_type):
+	def close_position(self, Account, ID, last_price):
 		
-		pair, frame, pos_type, rg = self.open_positions[ID]
+		pair, frame, rg, age = self.open_positions[ID]
 		time, vol, op, high, low, close = self.get_data(frame, pair)
 
 		if last_price != close[-1]:
@@ -323,18 +304,10 @@ class Test():
 		b_price, units = self.trades[ID]
 		val1 = b_price*units
 		val2 = last_price*units
-		self.avg_age += self.age[ID]
 
-		# long position
-		if pos_type == 1:
-			self.realized_profit += (val2-val1) # add to profit, could be negative
-			self.balance += (val2-val1)
-		# short position
-		else:
-			self.realized_profit = (val1-val2)
-			self.balance += (val1-val2)
-
+		self.realized_profit += (val2-val1) # add to profit, could be negative
 		self.trade_count -= 1
+		self.balance += (val2-val1)
 		self.margin = self.balance
 		self.mv_stopped += 1
 
@@ -342,9 +315,7 @@ class Test():
 			self.min_balance_reached = self.balance
 			self.low = self.total_trades
 
-		if (val2-val1) < 0 and pos_type == 1:
-			self.losing_tades[ID] = time[-1], pair, frame
-		elif (val1 - val2) < 0 and pos_type == 0:
+		if (val2-val1) < 0:
 			self.losing_tades[ID] = time[-1], pair, frame
 
 		print("< CLOSE ORDER:----------------------------------------------")
@@ -355,8 +326,8 @@ class Test():
 
 		del self.trades[ID]
 		del self.open_positions[ID]
+		del self.prediction[ID]
 		del self.stops[ID]
-		del self.age[ID]
 
 	def init_write(self):
 		open('sell_time.csv', 'w').close()
@@ -394,7 +365,7 @@ class Test():
 		pos_val = 0
 		for ID in list(self.open_positions):
 			#print("open position")
-			pair, frame, pos_type, rg = self.open_positions[ID]
+			pair, frame, rg, age = self.open_positions[ID]
 			close, low, high, op, vol, time = self.data[pair]
 			last_price = close[-1]
 
@@ -408,12 +379,10 @@ class Test():
 		print("Stopped trades:", self.stopped)
 		print("Closed trades:", self.mv_stopped)
 		print("Number of possible trades:", self.waiting_len)
-		print("bear signals:", self.bear_len)
 		print("Min account balance:", self.min_balance_reached)
-		print("avg age:", self.avg_age / self.total_trades)
 		print("Reached after", self.low, "trades")
 		print("Negative trade count:", len(self.losing_tades))
-		print("average leverage:", self.avg_lev / self.total_trades)
+		#print("average leverage:", self.avg_lev / self.total_trades)
 		print("Negative trades:")
 		for ID in self.losing_tades:
 			time, pair, frame = self.losing_tades[ID]
@@ -446,13 +415,12 @@ if __name__ == "__main__":
 	if chart_time == "H1":
 		# run backtest for highest frequency chart time
 		print("< running backtest on H1 candles")
-		#TEST.api_data("H1")  
-		TEST.api_date_range_data("H1")              # update the price data 
+		TEST.api_data("H1")               # update the price data 
 		length = (TEST.lookBack*24 - 60)  # hourly candles * 24 to get day
 		for itr in range(0, length):
 			find_signal(TEST, TEST, "H1") # pass frame as parameter
 			TEST.manage_stops()
-			manage_position(TEST, TEST)
+			manage_position(TEST, TEST, logger)
 			TEST.update_data("H1")
 
 		print("< backtest complete, print account summary:")
@@ -462,14 +430,13 @@ if __name__ == "__main__":
 	elif chart_time == "H4":
 		# run backtsest for medium frequency chart time
 		print("< running backtest on H4 candles")
-		#TEST.api_data("H4")
-		TEST.api_date_range_data("H4")               # update the price data
-		length = (TEST.lookBack - 60)  # 4 hour candles * 6 to get day
+		TEST.api_data("H4")               # update the price data
+		length = (TEST.lookBack*6 - 60)  # 4 hour candles * 6 to get day
 		print("< number of candles:", length, "\n")
 		for itr in range(0, length):
 			find_signal(TEST, TEST, "H4") # pass frame as parameter
 			TEST.manage_stops()
-			manage_position(TEST, TEST)
+			manage_position(TEST, TEST, logger)
 			TEST.update_data("H4")
 
 		print("< backtest complete, print account summary:")
@@ -490,6 +457,10 @@ if __name__ == "__main__":
 		print("< backtest complete, print account summary:")
 		print("-------------------------------------------------------------------------")
 		TEST.account_summary()
+
+
+
+
 
 
 

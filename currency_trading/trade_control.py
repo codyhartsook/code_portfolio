@@ -19,6 +19,7 @@ import oandapyV20.endpoints.instruments as instruments
 import oandapyV20.endpoints.positions as positions
 import oandapyV20.endpoints.accounts as accounts
 import oandapyV20.endpoints.orders as orders
+import oandapyV20.endpoints.trades as trades
 from oandapyV20.exceptions import V20Error
 from oandapyV20.contrib.requests import (
     MarketOrderRequest,
@@ -31,17 +32,24 @@ from sklearn.externals import joblib
 from keras.models import load_model
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# start the logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-fh = logging.FileHandler('ledger.log')
-fh.setLevel(logging.DEBUG)
+# function to construct multiple loggers
 formatter = logging.Formatter('%(levelname)s - %(message)s')
-fh.setFormatter(formatter)
+def setup_logger(name, log_file, level=logging.INFO):
 
-logger.addHandler(fh)
+    handler = logging.FileHandler(log_file)        
+    handler.setFormatter(formatter)
 
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.addHandler(handler)
+
+    return logger
+
+# general process logger
+logger = setup_logger('first_logger', 'ledger.log')
+
+# seperate logger keep a record of open positions
+backup = setup_logger('second_logger', 'backup.log')
 # -----------------------------------------------------------------------------
 # class account
 # store and update account information to be accessed by modules
@@ -77,10 +85,10 @@ class Account():
 		# account status information
 		self.balance = 0
 		self.trade_count = 0
-		self.age = {}                   # pickle age
 		self.waiting = {}				# pickle waiting
 		self.last_transaction_ID = ''	# pickle las_transaction
 		self.open_positions = {}		# pickle open_positions
+		self.prediction = {}
 		self.max_trade_count = 20
 		self.updateAccountInfo()
 		self.syncTrades()
@@ -101,54 +109,48 @@ class Account():
 
 		except V20Error as e:
 			logger.error("V20Error: %s", e)
-			#raise Exception("could not sync trades to api information")
 
 	# upload oanda open positions to local memory
 	# -------------------------------------------------------------------------
 	def syncTrades(self):
 		# load our pickled data structures
 		self.load_data_structures()
-		logger.info("   < local open positions:", self.open_positions)
+		logger.info("   < local open positions: %s", str(self.open_positions))
 		
 		r = positions.OpenPositions(accountID=self.accountID)
 
 		try:
 			info = {}
 			info = self.client.request(r)
-			#print(info)
 
 			# if there are not open positins on oanda
 			if len(info['positions']) == 0:
 				self.open_positions = {}
+				self.prediction = {}
+				self.save()
 
 			for pos in info['positions']:
 
 				trade_ids = pos['long']['tradeIDs']
 				for ID in trade_ids:
-					if ID not in self.open_positions:
+					id = int(ID)
+					if id not in self.open_positions:
 						
 						logger.warning("   < ID not in local positions: %s", str(ID))
 						logger.warning("   < Error: need to update open_positions")
+						logger.info("%s", str(self.open_positions))
 						
 						# read from backup
 						self.read_from_backup(ID)
 
-				# sync age dict, this is necesary if trades are closed manually
-				to_del1 = []
-				to_del2 = []
-				for ID_1, ID_2 in zip(self.age, self.open_positions):
-					if ID_1 not in pos['long']['tradeIDs']:
-						to_del1.append(ID_1)
-					if ID_2 not in pos['long']['tradeIDs']:
-						to_del2.append(ID_2)
+				# if trades are closed manually, update dictionaries
+				"""to_del = []
+				for ID in self.open_positions:
+					if str(ID) not in pos['long']['tradeIDs']:
+						to_del.append(ID)
 				
-				for ID in to_del1:
-					del self.age[ID]
-				for ID in to_del2:
-					del self.open_positions[ID]
-
-			# clear backup file
-			open('backup_trades.txt', 'w').close()
+				for ID in to_del:
+					del self.open_positions[ID]"""
 					
 		except V20Error as e:
 			logger.error("V20Error: %s", e)
@@ -158,55 +160,65 @@ class Account():
 	# -------------------------------------------------------------------------
 	def read_from_backup(self, ID):
 		
-		#try:
-		lines = [line.rstrip('\n') for line in open('backup_trades.txt')]
-		for line in lines:
-			data = line.split(',')
+		for line in reversed(open('backup.log').readlines()):
+			line = line.rstrip()
+			if str(ID) in line:
+				data = line.split("-")[1].split(',')
 
-			#print(data, "<-data")
+				ID = int(data[0].strip())
+				pair = data[1].strip()
+				frame = data[2].strip()
+				rg = float(data[3].strip())
+				age = float(data[4].strip())
 
-			ID = data[0].strip()
-			pair = data[1].strip()
-			frame = data[2].strip()
-			rg = int(data[3].strip())
-
-			self.addPosition(ID, pair, frame, rg)
-		#except FileNotFoundError as f:
-		#	print("no backup present")
-
+				print("reading from backup")
+				self.addPosition(ID, pair, frame, rg, age)
+				break
 
 	# add a position to our local memory
 	# -------------------------------------------------------------------------
-	def addPosition(self, ID, pair, frame, rg):
-		self.open_positions[ID] = pair, frame, rg
+	def addPosition(self, ID, pair, frame, rg, age):
+		self.open_positions[int(ID)] = pair, frame, rg, age
 		self.last_transaction_ID = ID
-		self.age[ID] = 0
+		self.prediction[int(ID)] = 1
+
+	# update the age of a position
+	# -------------------------------------------------------------------------
+	def set_age(self, ID, delta):
+		pair, frame, rg, age = self.open_positions[ID]
+
+		self.open_positions[ID] = pair, frame, rg, (age + delta)
 
 	# laod pickled objects
 	# -------------------------------------------------------------------------
 	def get_obj(self, name):
-		#try:
+	
 		infile = open(name+'.pickle', 'rb')
 		obj = pickle.load(infile)
 		infile.close()
 		return obj
-		#except FileNotFoundError as f:
-		#	return None
 
 	def load_data_structures(self):
 		self.get_obj("age")
-		self.age = self.get_obj("age")
 		self.waiting = self.get_obj("waiting")
 		self.last_transaction_ID = self.get_obj("last_ID")
 		self.open_positions = self.get_obj("open_positions")
+		self.prediction = self.get_obj("prediction")
 
     # save all local data structures to be used on on the next program instance
 	# -------------------------------------------------------------------------
 	def save(self):
-		self.pickle_obj(self.age, "age")
 		self.pickle_obj(self.waiting, "waiting")
 		self.pickle_obj(self.last_transaction_ID, "last_ID")
 		self.pickle_obj(self.open_positions, "open_positions")
+		self.pickle_obj(self.prediction, "prediction")
+
+		for ID in self.open_positions:
+			pair, frame, rg, age = self.open_positions[ID]
+
+			# later remove out of date entries
+			print("saving positions")
+			backup.info("%s, %s, %s, %s, %s", str(ID), pair, frame, str(rg), str(age))
 
 	def pickle_obj(self, structure, name):
 		outfile = open(name+'.pickle', 'wb')
@@ -222,8 +234,8 @@ class Account():
 	# -------------------------------------------------------------------------
 	def possible_trade(self, pair, frame, prediction, rg, o_slope, p_slope, obv, cycle, lev):
 		waiting_str = pair+","+frame
-		logger.info("adding %s to possible trades", waiting_str)
-		self.waiting[waiting_str] = [0, pair, frame, 0, prediction, rg, lev]
+		logger.info("<   adding %s to possible trades", waiting_str)
+		self.waiting[waiting_str] = [0, pair, frame, prediction, rg, lev]
 
 	# retrieve a waiting currency pair/frame object
 	# -------------------------------------------------------------------------
@@ -290,35 +302,27 @@ class Trade():
 
 	# write to backup file in case of a program crash
 	# -------------------------------------------------------------------------
-	def write_to_backup(self, ID, pair, frame, rg):
-		with open('/home/ec2-user/Trade/backup_trades.txt', 'r+') as backup:
-			ln = str(ID)+", "+pair+", "+frame+", "+str(rg)+"\n"
-			backup.write(ln)
-			backup.close()
+	def write_to_backup(self, ID):
+		pair, frame, rg, age = self.open_positions[ID]
 
-	# for testing
-	def write_age(self):
-		with open('/home/ec2-user/Trade/age_log.txt', 'r+') as writer:
-			for ID in self.age:
-				ln = (str(ID)+" -> "+str(self.age[ID])+"\n")
-				writer.write(ln)
-			writer.close()
+		# later remove out of date entries
+		backup.info("%s, %s, %s, %s, %s", str(ID), pair, frame, str(rg), str(age))
 
 	# write to trade log ledger
 	# -------------------------------------------------------------------------
 	def trade_log(self, ID, action, time, pair, frame):
-		with open('/home/ec2-user/Trade/trade_log.txt', 'r+') as ledger:
-			ln = "Trade: ID="+str(ID)+" | "+action+" | "+time+" | pair="+pair+" | stop_price="+str(stop_price)+"\n"
-			logger.info("placing trade: %s", ln)
-			ledger.write(ln)
-			ledger.close()
+		ln = "Trade: ID="+str(ID)+" | "+action+" | "+str(time)+" | pair="+pair+"\n"
+		logger.info("Order Created: %s", ln)
 
 	# initialize a stop loss trade 
 	# -------------------------------------------------------------------------
-	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg, sig_type):
+	def stop_loss_trade(self, Account, units, pair, stop_price, frame, last_price, rg):
+		# round to last 4 digits
+		if "JPY" in frame:
+			stop_price = round(stop_price, 2)
+		else:
+			stop_price = round(stop_price, 4)
 		
-		#if sig_type == 0: # short 
-		#	units = (units * -1)
 		# define the order request
 		mktOrder = MarketOrderRequest(
     		instrument=pair,
@@ -330,20 +334,22 @@ class Trade():
 		accountID = Account.accountID
 		access_token = Account.access_token
 
+		logger.info("<   PLACING TRADE: %s on %s with range of %s", pair, frame, str(rg))
 		try:
     		# request the order
 			r = orders.OrderCreate(accountID, data=mktOrder.data)
 			api.request(r)
 			res = r.response
+			print(res)
 
 
 			# add ID, pair, frame, range to open positions
 			Account.addPosition(res['orderFillTransaction']['id'], 
-				res['orderFillTransaction']['instrument'], frame, rg)
+				res['orderFillTransaction']['instrument'], frame, rg, 0)
 			
 			# write trade to backup file
 			self.write_to_backup(res['orderFillTransaction']['id'], 
-				res['orderFillTransaction']['instrument'], frame, rg)
+				res['orderFillTransaction']['instrument'], frame, rg, 0)
 
 			action = "Buy_Order"
 			time = datetime.datetime.now()
@@ -352,17 +358,19 @@ class Trade():
 
 		except oandapyV20.exceptions.V20Error as err:
 			logger.warning(err)
-			raise Exception("erorr detected on order request")
+			#raise Exception("erorr detected on order request")
 
 	# close the position for the given ID
 	# -------------------------------------------------------------------------
-	def close_position(self, Account, ID, pair, frame, close, pos_type):
-		logger.info("   < closing a position for ID =", ID, ">\n")
-		r = orders.OrderCancel(accountID=Account.accountID, orderID=ID)
+	def close_position(self, Account, ID, pair, frame, close):
+		trade_ID = str(ID)
+		logger.info("   < closing a position for ID %s -> %s on %s", str(ID), pair, frame)
+
+		r = trades.TradeClose(accountID=Account.accountID, tradeID=trade_ID)
 		try:
 			Account.client.request(r)
 			del Account.open_positions[ID] # remove from local dict
-			del Account.age[ID]
+			del Account.prediction[ID]
 
 			action = "Sell_Order"
 			time = datetime.datetime.now()
@@ -370,6 +378,7 @@ class Trade():
 
 			return True
 		except:
+			logger.warning("   < could not close trade")
 			raise Exception("could not close position")
 
 # -----------------------------------------------------------------------------
@@ -379,36 +388,43 @@ class Trade():
 if __name__ == "__main__":
 
 	#print("/////////////////////////////////////////////////////////////////////////")
-	#logger.info('// initializing forex program')
-	logger.info('-- timestamp: %s', str(datetime.datetime.now()))
+	logger.info('-- NEW INSTANCE: %s', str(datetime.datetime.now()))
 	#print("/////////////////////////////////////////////////////////////////////////\n")
 
 	ACCOUNT = Account() # get an instance of the Account class
 	TRADE = Trade()     # get an instance of the Trade class
 
-	try:
-		for frame in ["H4", "H1"]:
-			
-			# run sub-program to find buying signals
-			find_signal(ACCOUNT, TRADE, frame)
+	#try:
+	for frame in ["H4", "H1"]:
+		
+		# run sub-program to find buying signals
+		find_signal(ACCOUNT, TRADE, frame)
 
-		# run sub-program to find selling signals
-		manage_position(ACCOUNT, TRADE)
+	# run sub-program to find selling signals
+	manage_position(ACCOUNT, TRADE, logger)
 
-		ACCOUNT.save()
-		ACCOUNT.load_data_structures()
+	ACCOUNT.load_data_structures()
 
-		# program summary
-		logger.info("   < acount balance: %s", str(ACCOUNT.getBalance()))
-		logger.info("   < trade count: %s", str(ACCOUNT.trade_count))
-		logger.info("   < number of IDs in waiting: %s", str(len(ACCOUNT.waiting)))
-		logger.info("   < number of IDs in age: %s", str(len(ACCOUNT.age)))
+	# program summary
+	logger.info("   < acount balance: %s", str(ACCOUNT.getBalance()))
+	logger.info("   < trade count: %s", str(ACCOUNT.trade_count))
+	logger.info("   < number of IDs in waiting: %s", str(len(ACCOUNT.waiting)))
+	
+	# report on open positions
+	for ID in ACCOUNT.open_positions:
+		logger.info("   < ID: %s -> position: %s", str(ID), str(ACCOUNT.open_positions[ID]))
 
-	except Exception as err:
+	logger.info("   < end of report\n")
+
+	# pickle objects
+	ACCOUNT.save()
+
+	"""except Exception as err:
 		print(err)
 		logger.error("Error occured in main program: %s", err)
+		ACCOUNT.save() # pickle data structures
 		logger.error("\n<Usage>: exiting program")
-		exit()
+		exit()"""
 
 
 

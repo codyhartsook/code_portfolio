@@ -2,10 +2,11 @@
 # sub program to close account positions
 
 import time
+import datetime
 import numpy as np
 from utility_funcs import StochRSI, bullish_candles, bearish_candles, ALMA, RSI, MACD, OBV, NATR
 
-def manage_position(Account, Trade):
+def manage_position(Account, Trade, logger):
 
 	# utility function
 	# -------------------------------------------------------------------------
@@ -17,7 +18,7 @@ def manage_position(Account, Trade):
 		out = np.array([flat])
 		return out
 
-	# convert range of prediction to leverage range
+	# convert range of prediction 
 	# -------------------------------------------------------------------------
 	def transform(weight, frame):
 		mn, mx = Account.lev_range[frame]
@@ -30,101 +31,87 @@ def manage_position(Account, Trade):
 
 	# place an order for given pair
 	# -------------------------------------------------------------------------
-	def buy(units, pair, frame, close, lev, rg, sig_type):
+	def buy(units, pair, frame, close, lev, rg):
 	
 		# look at relative lows
 		last_price = close[-1]
-		min_price = 1000
-		max_price = 0
+		min_price = 0
 		l = len(close)
 
 		# find low point for stop loss
 		for lookBack in range(1, rg):
 			if min_price > close[l-lookBack]:
 				min_price = close[l-lookBack]
-			if max_price < close[l-lookBack]:
-				max_price = close[l-lookBack]
 
 		STOP_LOSS = 0
 		# for now, determine stop based on frame
-		if frame == "H1" and sig_type == 1:              
-			STOP_LOSS = max((last_price*.997), min_price*.998)
-		elif frame == "H4" and sig_type == 1:				 
-			STOP_LOSS = max((last_price*.988), min_price*.992)
-		elif frame == "H1" and sig_type == 0:
-			STOP_LOSS = min(((last_price*1.03), max_price*1.02))
-		elif frame == "H4" and sig_type == 0:
-			STOP_LOSS = min(((last_price*1.15), max_price*1.08))
+		if frame == "H1":                #D
+			STOP_LOSS = max((last_price*.99), min_price)
+		elif frame == "H4":				 #H4
+			STOP_LOSS = max((last_price*.985), min_price)
 
 		# call order function from main module
-		Trade.stop_loss_trade(Account, units, pair, STOP_LOSS, frame, last_price, rg, sig_type)
+		Trade.stop_loss_trade(Account, units, pair, STOP_LOSS, frame, last_price, rg)
 
 	# determine if we should place an order on a waiting pair
 	# -------------------------------------------------------------------------
-	def buy_sig(weight, op, high, low, close, lev, pair, frame, rg, sig_type):
+	def buy_sig(weight, op, high, low, close, lev, pair, frame, rg):
 		orders = 0
 
-		# bullish order
-		if sig_type == 1:
+		if frame=="H4":
+			rsi_level = 55
+		else:
+			rsi_level = 55
 
-			if frame=="H4":
-				rsi_level = 55
-			else:
-				rsi_level = 55
+		fastk, fastd = StochRSI(close)
+		if ((fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1])):
 
-			fastk, fastd = StochRSI(close)
-			signal = False
-			if ((fastk[-1] >= fastd[-1]) and (fastk[-1] < rsi_level and close[-1])) and sig_type == 1:
-				signal = True
-			elif ((fastk[-1] < fastd[-1]) and (fastk[-1] > rsi_level and close[-1])) and sig_type == 0:
-				signal = True
+			if Trade.can_trade(Account, pair, frame):
+				Balance = Account.getBalance()
+				
+				# we are ready to make a trade
+				if Balance > 0:
+					orders = 1
 
-			if signal:
+					# see if there was a bullish candle present
+					candle = False
+					hammer, engulf, pierce = bullish_candles(op, high, low, close)
+					if hammer[-1] > 0 or engulf[-1] > 0 or pierce[-1] > 0:
+						candle = True
 
-				if Trade.can_trade(Account, pair, frame, sig_type):
-					Balance = Account.getBalance()
-					
-					# we are ready to make a trade
-					if Balance > 0:
-						orders = 1
+					# define the leverage based of prediction weight
+					leverage = transform(weight, frame)
+					Account.avg_lev += leverage
+					# if we found reversal candle, increase leverage slightly
+					if candle:
+						trade_value = (Balance*Account.lev_boost*50)
+					else:
+						trade_value = (Balance*leverage)*50
 
-						# see if there was a bullish candle present
-						candle = False
-						hammer, engulf, pierce = bullish_candles(op, high, low, close)
-						if hammer[-1] > 0 or engulf[-1] > 0 or pierce[-1] > 0:
-							candle = True
-
-						# define the leverage based of prediction weight
-						leverage = transform(weight, frame)
-						Account.avg_lev += leverage
-						# if we found reversal candle, increase leverage slightly
-						if candle:
-							trade_value = (Balance*Account.lev_boost*50)
-						else:
-							trade_value = (Balance*leverage)*50
-
-						units = trade_value/close[-1]
-						buy(units, pair, frame, close, lev, rg, sig_type)
+					units = trade_value/close[-1]
+					buy(units, pair, frame, close, lev, rg)
 		
 		return orders
 
 	# determine if we should close a position
 	# -------------------------------------------------------------------------
-	def close_sig(op, high, low, close, pair, frame, ID, rg, pos_type):
+	def close_sig(op, high, low, close, pair, frame, ID, rg, age):
+
+		day = datetime.datetime.today().weekday()
+		age_acc = 0
+		# differentiate between backtest and real program
+		if Account == Trade:
+			age_acc = 1
+		elif day <= 4:
+			if frame == "H1":
+				age_acc = (1.0/4)
+			elif frame == "H4":
+				age_acc = (1.0/16)
+
+		Account.set_age(ID, age_acc)
 
 		# let trade develop
-		if Account.age[ID] < (rg - 20):
-			
-			# differentiate between backtest and real program
-			if Account == Trade:
-				age_acc = 1
-			else:
-				if frame == "H1":
-					age_acc = (24 / Account.data_poll)
-				elif frame == "H4":
-					age_acc = (6 / Account.data_poll)
-	
-			Account.age[ID] += age_acc
+		if age < (rg - 20):
 			return 0
 
 		rsi = RSI(close)
@@ -147,17 +134,29 @@ def manage_position(Account, Trade):
 			pred_data = Account.H4_SELL_scaler.transform(pred_data)
 			prediction = Account.H4_SELL_model.predict(pred_data)
 
+		if prediction < Account.prediction[ID]: # track min prediction
+			Account.prediction[ID] = prediction
 
-		if prediction < 0.5 and (aF[-1] < aS[-1] and stF[-1] < stS[-1]):
-			closed = close_pos(ID, pair, frame, close, 0, pos_type)
+		logger.info("   < peak prediction for %s: %s", pair, str(Account.prediction[ID]))
+		logger.info("   < alma: %s -- stochastic: %s for %s", str(aF[-1]-aS[-1]), str(stF[-1]-stS[-1]), pair)
+		if Account.prediction[ID] < 0.35 and (aF[-1] < aS[-1]*1.001 and stF[-1] <= stS[-1]):
+			closed = close_pos(ID, pair, frame, close)
 		return 1
 
 	# close a position for given pair
 	# -------------------------------------------------------------------------
-	def close_pos(ID, pair, frame, close, atempts, pos_type):
-		success = Trade.close_position(Account, ID, pair, frame, close[-1], pos_type)
+	def close_pos(ID, pair, frame, close):
+		success = Trade.close_position(Account, ID, pair, frame, close[-1])
+		closed = 1
 
-		return success
+		if success == False:
+			print("< closing position failed, trying again")
+			
+			buffer_time = 10       
+			time.sleep(buffer_time) # wait 10 seconds
+			close_pos(ID, pair, frame, close)  # make recursive call to close position
+
+		return closed
 
 	# -------------------------------------------------------------------------
 	# see if we need to close any positions
@@ -168,15 +167,13 @@ def manage_position(Account, Trade):
 	close = []
 
 	for ID in list(positions):
-		pair, frame, rg = positions[ID]
-		pos_type = 0
+		pair, frame, rg, age = positions[ID]
 		
 		time, vol, op, high, low, close = Account.get_data(frame, pair)
-
 		if vol.size == 0:
 			continue
 	
-		closed += close_sig(op, high, low, close, pair, frame, ID, rg, pos_type)
+		closed += close_sig(op, high, low, close, pair, frame, ID, rg, age)
 
 	# -------------------------------------------------------------------------
 	# see if there was a trigger hit
@@ -190,38 +187,35 @@ def manage_position(Account, Trade):
 		age = waiting[key_str][0]
 		pair = waiting[key_str][1]
 		frame = waiting[key_str][2]
-		sig_type = waiting[key_str][3]
-		weight = waiting[key_str][4]
-		rg = waiting[key_str][5]
-		lev = waiting[key_str][6]
+		weight = waiting[key_str][3]
+		rg = waiting[key_str][4]
+		lev = waiting[key_str][5]
 
+		day = datetime.datetime.today().weekday()
+		age_acc = 0
 		# we want to add to waiting age but backtest 
-		# and trade_control pull data differently
+		#    and forex_trading pull data differently
 		if Account == Trade:
 			age_acc = 1
-		else:
+			day = 0
+		
+		elif day <= 4:
 			if frame == "H1":
-				age_acc = (24 / Account.data_poll)
+				age_acc = (1.0/2.0)
 			elif frame == "H4":
-				age_acc = (6 / Account.data_poll)
+				age_acc = (1.0/8.0)
 		
 		if age < 3:
 			Account.waiting[key_str][0] += age_acc # add to age
 		
 			time, vol, op, high, low, close = Account.get_data(frame, pair)
-			
+
 			if vol.size == 0:
 				continue
 
-			orders += buy_sig(weight, op, high, low, close, lev, pair, frame, rg, sig_type)
-			
+			orders += buy_sig(weight, op, high, low, close, lev, pair, frame, rg)
 		else:
 			Account.end_waiting(key_str)
-
-
-
-
-
 
 
 
