@@ -22,9 +22,9 @@ import oandapyV20.endpoints.orders as orders
 import oandapyV20.endpoints.trades as trades
 from oandapyV20.exceptions import V20Error
 from oandapyV20.contrib.requests import (
-    MarketOrderRequest,
-    TakeProfitDetails,
-    StopLossDetails)
+	MarketOrderRequest,
+	TakeProfitDetails,
+	StopLossDetails)
 
 # for ml predictions
 from sklearn import preprocessing
@@ -36,14 +36,14 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 formatter = logging.Formatter('%(levelname)s - %(message)s')
 def setup_logger(name, log_file, level=logging.INFO):
 
-    handler = logging.FileHandler(log_file)        
-    handler.setFormatter(formatter)
+	handler = logging.FileHandler(log_file)        
+	handler.setFormatter(formatter)
 
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    logger.addHandler(handler)
+	logger = logging.getLogger(name)
+	logger.setLevel(level)
+	logger.addHandler(handler)
 
-    return logger
+	return logger
 
 # general process logger
 logger = setup_logger('first_logger', 'ledger.log')
@@ -77,9 +77,9 @@ class Account():
 
 		# define leverage ranges
 		self.lev_range = {}
-		self.lev_range["H4"] = .04, .065
-		self.lev_range["H1"] = .03, .055
-		self.lev_boost = 0.06
+		self.lev_range["H4"] = .02, .05
+		self.lev_range["H1"] = .02, .04
+		self.lev_boost = 0.05
 		self.avg_lev = 0
 
 		# account status information
@@ -142,15 +142,6 @@ class Account():
 						
 						# read from backup
 						self.read_from_backup(ID)
-
-				# if trades are closed manually, update dictionaries
-				"""to_del = []
-				for ID in self.open_positions:
-					if str(ID) not in pos['long']['tradeIDs']:
-						to_del.append(ID)
-				
-				for ID in to_del:
-					del self.open_positions[ID]"""
 					
 		except V20Error as e:
 			logger.error("V20Error: %s", e)
@@ -205,7 +196,7 @@ class Account():
 		self.open_positions = self.get_obj("open_positions")
 		self.prediction = self.get_obj("prediction")
 
-    # save all local data structures to be used on on the next program instance
+	# save all local data structures to be used on on the next program instance
 	# -------------------------------------------------------------------------
 	def save(self):
 		self.pickle_obj(self.waiting, "waiting")
@@ -256,8 +247,8 @@ class Account():
 	# -------------------------------------------------------------------------
 	def get_data(self, frame, pair):
 		params = {
-	        "count": 60,          # number of candles: 60 is default 
-	        "granularity": frame}  # time frame
+			"count": 60,          # number of candles: 60 is default 
+			"granularity": frame}  # time frame
 
 		try:
 			r = instruments.InstrumentsCandles(instrument=pair, params=params)
@@ -305,7 +296,6 @@ class Trade():
 	def write_to_backup(self, ID):
 		pair, frame, rg, age = self.open_positions[ID]
 
-		# later remove out of date entries
 		backup.info("%s, %s, %s, %s, %s", str(ID), pair, frame, str(rg), str(age))
 
 	# write to trade log ledger
@@ -325,22 +315,22 @@ class Trade():
 		
 		# define the order request
 		mktOrder = MarketOrderRequest(
-    		instrument=pair,
-    		units=units,
-    		stopLossOnFill=StopLossDetails(price=stop_price).data
+			instrument=pair,
+			units=units,
+			stopLossOnFill=StopLossDetails(price=stop_price).data
 		)
 
 		api = Account.client
 		accountID = Account.accountID
 		access_token = Account.access_token
 
-		logger.info("<   PLACING TRADE: %s on %s with range of %s", pair, frame, str(rg))
+		logger.info("<    PLACING TRADE: %s on %s with range of %s", pair, frame, str(rg))
 		try:
-    		# request the order
+			# request the order
 			r = orders.OrderCreate(accountID, data=mktOrder.data)
 			api.request(r)
 			res = r.response
-			print(res)
+			logger.error("<    Error in placing trade")
 
 
 			# add ID, pair, frame, range to open positions
@@ -348,8 +338,7 @@ class Trade():
 				res['orderFillTransaction']['instrument'], frame, rg, 0)
 			
 			# write trade to backup file
-			self.write_to_backup(res['orderFillTransaction']['id'], 
-				res['orderFillTransaction']['instrument'], frame, rg, 0)
+			self.write_to_backup(res['orderFillTransaction']['id'])
 
 			action = "Buy_Order"
 			time = datetime.datetime.now()
@@ -364,7 +353,7 @@ class Trade():
 	# -------------------------------------------------------------------------
 	def close_position(self, Account, ID, pair, frame, close):
 		trade_ID = str(ID)
-		logger.info("   < closing a position for ID %s -> %s on %s", str(ID), pair, frame)
+		logger.info("	< closing a position for ID %s -> %s on %s", str(ID), pair, frame)
 
 		r = trades.TradeClose(accountID=Account.accountID, tradeID=trade_ID)
 		try:
@@ -387,9 +376,7 @@ class Trade():
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
 
-	#print("/////////////////////////////////////////////////////////////////////////")
 	logger.info('-- NEW INSTANCE: %s', str(datetime.datetime.now()))
-	#print("/////////////////////////////////////////////////////////////////////////\n")
 
 	ACCOUNT = Account() # get an instance of the Account class
 	TRADE = Trade()     # get an instance of the Trade class
@@ -402,8 +389,6 @@ if __name__ == "__main__":
 
 	# run sub-program to find selling signals
 	manage_position(ACCOUNT, TRADE, logger)
-
-	ACCOUNT.load_data_structures()
 
 	# program summary
 	logger.info("   < acount balance: %s", str(ACCOUNT.getBalance()))
