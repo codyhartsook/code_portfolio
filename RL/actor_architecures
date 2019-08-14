@@ -1,0 +1,59 @@
+# actor architectures
+
+# 1D cnn -- does not work yet
+# -----------------------------------------------------------------------------
+def build_actor(env, nb_actions, features, window):
+	input_shape = env.observation_space.shape[0]
+
+	actor = Sequential()
+	actor.add(Conv1D(100, 10, activation='relu', input_shape=(1, input_shape)))
+	actor.add(Conv1D(100, 10, activation='relu'))
+	actor.add(MaxPooling1D(3))
+	actor.add(Conv1D(160, 10, activation='relu'))
+	actor.add(Conv1D(160, 10, activation='relu'))
+	actor.add(GlobalAveragePooling1D())
+	actor.add(Dropout(0.5))
+	actor.add(Dense(nb_actions))
+	actor.add(Activation('linear'))
+
+	return actor
+
+# lstm -- works
+# -----------------------------------------------------------------------------
+def build_actor(env, nb_actions, features, window):
+	input_shape = env.observation_space.shape[0]
+	
+	actor = Sequential()
+	actor.add(LSTM(128, input_shape=(1, input_shape), return_sequences=True))
+	actor.add(Activation('relu'))
+	actor.add(Dropout(.2))
+	actor.add(LSTM(64))
+	actor.add(Activation('relu'))
+	actor.add(Dropout(.2))
+	actor.add(Dense(32))
+	actor.add(Activation('relu'))
+	actor.add(Dense(nb_actions))
+	actor.add(Activation('linear'))
+
+	return actor
+
+# feed forward dnn -- works
+# -----------------------------------------------------------------------------
+def build_actor(env, nb_actions, features, window):
+	actor = Sequential()
+	actor.add(Flatten(input_shape=(1,) + env.observation_space.shape))
+	actor.add(Dense(128))
+	actor.add(Activation('relu'))
+	actor.add(Dropout(.2))
+	actor.add(Dense(128))
+	actor.add(Activation('relu'))
+	actor.add(Dense(64))
+	actor.add(Activation('relu'))
+	actor.add(Dropout(.2))
+	actor.add(Dense(32))
+	actor.add(Activation('relu'))
+	actor.add(Dropout(.2))
+	actor.add(Dense(nb_actions))
+	actor.add(Activation('linear'))
+    
+	return actor
