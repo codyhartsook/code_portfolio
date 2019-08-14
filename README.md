@@ -1,4 +1,4 @@
-# code_portfolio
+# Code Portfolio
 
 This repository contains some of my most recent and significant projects.  
 
