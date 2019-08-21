@@ -29,11 +29,12 @@ compute server with minimum weighted distance from them. This distance
 is defined as the distance between two, three dimensional points in space.   
 The x and y coordinates represent longitude and latitude while the z   
 coordinate is a function of local energy cost and demand. The matching is  
-done by searching the network server's d-dimensional tree of compute  
+done by searching the network server's 3-dimensional tree of compute  
 servers which returns the server with the smallest distance to the client.  
 A critical aspect of the system is defining the z coordinate of the  
 compute servers. This will be done by retrieving the real time electricity  
 cost in the region of the server and using that to generate a discrete   
 value. This value must be large enough that it can out-weigh the x and y  
-coordinates when computing the closest neighbor.  
+coordinates when computing the closest neighbor. This will enable clients  
+to connect to servers in low cost/low demand regions.  
 

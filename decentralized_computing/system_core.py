@@ -1,51 +1,10 @@
 # Decentralized Cloud Computing Network Project
 # Status: in progress
-__author__ Cody Hartsook
 
 import random
 import socket
 import protocol
-
-# -----------------------------------------------------------------------------
-# network's compute engine ID
-# this allows the network to keep track of it's availiable servers/engines
-# -----------------------------------------------------------------------------
-class Compute_Engine_Ref():
-	def __init__(self, ip, longitude, latitude, Pr_Power):
-		self.Long = longitude
-		self.Lat = latitude
-		self.Pr_Power = Pr_Power
-		self.State = None
-
-		self.my_ip = ip
-		self.peer_ip = ""
-		self.peer_port = None
-
-	def __str__(self):
-		string = "long: "+str(self.Long)+", lat: "+str(self.Lat)+", Power: "+\
-			str(self.Pr_Power)+", key:"+str(self.Long+self.Lat)
-		return string
-
-	def update(self, grid):
-		pass
-
-# -----------------------------------------------------------------------------
-# network's client ID class
-# this is a server side class
-# -----------------------------------------------------------------------------
-class Client_Ref():
-	def __init__(self, ip, Long, Lat, ic, cpi, Priority):
-		self.Long = Long
-		self.Lat = Lat
-		self.I_C = ic
-		self.CPI = cpi
-		self.Priority = Priority
-		self.Done = False
-		self.Elapsed = None
-
-		self.my_ip = ""
-		self.peer_ip = ""
-		self.peer_port = None
+import pickle
 
 # -----------------------------------------------------------------------------
 # this class will utilize third party APIs in order to get local electricity
@@ -71,6 +30,7 @@ class micro_grid(Grid):
 # -----------------------------------------------------------------------------
 class Client():
 	def __init__(self):
+		self.Title = "client"
 		self.ID = None
 		self.Long = None
 		self.Lat = None
@@ -86,7 +46,7 @@ class Client():
 		self.network_port = 7876
 		self.peer_port = None
 		self.set_ip()
-		self.random_init()
+		self.test()
 
 	def set_ip(self):
 		#local_hostname = socket.gethostname()
@@ -94,10 +54,9 @@ class Client():
 		# get the according IP address
 		#ip_address = socket.gethostbyname(local_fqdn)
 		ip_address = "10.0.0.114"
-
 		self.my_ip = ip_address
 
-	def random_init(self):
+	def test(self):
 		self.Long = random.randint(0, 360)
 		self.Lat = random.randint(0, 180)
 
@@ -105,39 +64,13 @@ class Client():
 		self.CPI = random.randint(2, 6)
 		self.Priority = random.randint(0, 3)
 
-	def manual_init(self):
+	# remotely run an application or program
+	def run(self, Application):
 		pass
 
-	def read(self, S):
+	# get an estimate of how intensive the given application is to run
+	def computational_intensity(self, Application):
 		pass
-
-	def write(self, message, S):
-		pass
-
-	def network_server_connection(self):
-		print("connecting to network")
-
-		while True:
-
-			S = socket.socket()
-			S.connect((self.network_ip, self.network_port))
-
-			msg = "client_connect,"
-			msg += str(self.my_ip) + ","
-			msg += str(self.Long) + ","
-			msg += str(self.Lat) + ","
-			msg += str(self.I_C) + ","
-			msg += str(self.CPI) + ","
-			msg += str(self.Priority)
-			encoded_msg=bytes(msg, "utf-8")
-			S.send(encoded_msg)
-			break
-
-	def peer_connection(self):
-		if self.peer_port == None:
-			print("connot connect to peer before network server")
-		else:
-			pass
 
 # -----------------------------------------------------------------------------
 # Define an end-user compute_engine / local computer
@@ -145,8 +78,11 @@ class Client():
 # -----------------------------------------------------------------------------
 class Compute_Engine():
 	def __init__(self):
+		self.Title = "engine"
 		self.Long = None
 		self.Lat = None
+		self.Z = None
+		self.coords = None
 		self.Pr_Power = None
 		self.State = None
 		self.ID = None
@@ -166,48 +102,98 @@ class Compute_Engine():
 		# get the according IP address
 		#ip_address = socket.gethostbyname(local_fqdn)
 		ip_address = "10.0.0.114"
-
 		self.my_ip = ip_address
+
+	def __len__(self):
+		return len(self.coords)
+
+	def __getitem__(self, i):
+		return self.coords[i]
+
+	def __repr__(self):
+		return 'Compute_Engine({}, {}, {})'.format(self.coords[0], self.coords[1], self.coords[2])
+
+	# define a function which maps electricity cost to a discrete value
+	# this is used to define the third dimension of a point x, y, z
+	def energy_bias(self, server):
+		self.Z = random.randint(0, 360)
 
 	def random_init(self):
 		self.Long = random.randint(0, 360)
 		self.Lat = random.randint(0, 180)
-
+		self.coords = (self.Long, self.Lat, self.Z)
 		self.Pr_Power = random.randint(1, 10)
 
-	def manual_init(self):
+	# sign up local machine as a compute server
+	def register_machine(self):
 		pass
 
-	def read(self, S):
+	# run the application or program 
+	def run(self, application):
 		pass
 
-	def write(self, message, S):
-		pass
+# -----------------------------------------------------------------------------
+# Define an end-user compute_engine / local computer
+# This is is local class with a UI
+# -----------------------------------------------------------------------------
+class Engine_UI():
+	def __init__(self):
+		self.Virtual_Machine = None
+		self.Agent = Compute_Engine()
 
-	def network_server_connection(self):
+	def connect_to_network(self):
+			
+		self.Agent.energy_bias() # sets agents z coor
 
-		while True:
-
+		try:
+			
 			S = socket.socket()
-			S.connect((self.network_ip, self.network_port))
+			S.connect((self.Agent.network_ip, self.Agent.network_port))
 
-			msg="register_comp,"
-			msg += self.my_ip + ","
-			msg += str(self.Long) + ","
-			msg += str(self.Lat) + ","
-			msg += str(self.Pr_Power)
-			encoded_msg=bytes(msg, "utf-8")
-			S.send(encoded_msg)
-			break
+			Agent_Pickle = pickle.dumps(self.Agent)
+			S.send(Agent_Pickle)
+
+		except:
+			print("error occured when connecting engine to network")
 
 	def peer_connection(self):
-		if self.peer_port == None:
+		if Agent.peer_port == None:
 			print("connot connect to peer before network server")
 		else:
 			pass
 
-	def compute(task):
-		pass
+# -----------------------------------------------------------------------------
+# Define an end-user client
+# This is is local class with a UI
+# -----------------------------------------------------------------------------
+class Client_UI():
+	def __init__(self):
+		self.Agent = Client()
+
+	def connect_to_network(self):
+
+		try:
+
+			S = socket.socket()
+			S.connect((self.Agent.network_ip, self.Agent.network_port))
+
+			Agent_Pickle = pickle.dumps(self.Agent)
+			S.send(Agent_Pickle)
+
+		except:
+			print("error occured when connecting client to network")
+
+	def peer_connection(self):
+		if Agent.peer_port == None:
+			print("connot connect to peer before network server")
+		else:
+			pass
+
+
+
+
+
+
 
 
 

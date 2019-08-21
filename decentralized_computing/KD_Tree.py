@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 
 
+"""A Python implemntation of a kd-tree
+This package provides a simple implementation of a kd-tree in Python.
+https://en.wikipedia.org/wiki/K-d_tree
+"""
+
 from __future__ import print_function
 
 import heapq
@@ -21,8 +26,7 @@ class Node(object):
     A tree is represented by its root node, and every node represents
     its subtree"""
 
-    def __init__(self, ID=None, data=None, left=None, right=None):
-        self.ID = ID
+    def __init__(self, data=None, left=None, right=None):
         self.data = data
         self.left = left
         self.right = right
@@ -187,7 +191,7 @@ class KDNode(Node):
     """ A Node that contains kd-tree specific data and methods """
 
 
-    def __init__(self, ID=None, data=None, left=None, right=None, axis=None,
+    def __init__(self, data=None, left=None, right=None, axis=None,
             sel_axis=None, dimensions=None):
         """ Creates a new node for a kd-tree
         If the node will be used within a tree, the axis and the sel_axis
@@ -195,15 +199,14 @@ class KDNode(Node):
         sel_axis(axis) is used when creating subnodes of the current node. It
         receives the axis of the parent node and returns the axis of the child
         node. """
-        super(KDNode, self).__init__(ID, data, left, right)
-        self.ID = ID
+        super(KDNode, self).__init__(data, left, right)
         self.axis = axis
         self.sel_axis = sel_axis
         self.dimensions = dimensions
 
 
     @require_axis
-    def add(self, point, ID):
+    def add(self, point):
         """
         Adds a point to the current node or iteratively
         descends to one of its children.
@@ -217,29 +220,28 @@ class KDNode(Node):
             # Adding has hit an empty leaf-node, add here
             if current.data is None:
                 current.data = point
-                current.ID = ID
                 return current
 
             # split on self.axis, recurse either left or right
             if point[current.axis] < current.data[current.axis]:
                 if current.left is None:
-                    current.left = current.create_subnode(point, ID)
+                    current.left = current.create_subnode(point)
                     return current.left
                 else:
                     current = current.left
             else:
                 if current.right is None:
-                    current.right = current.create_subnode(point, ID)
+                    current.right = current.create_subnode(point)
                     return current.right
                 else:
                     current = current.right
 
 
     @require_axis
-    def create_subnode(self, data, ID):
+    def create_subnode(self, data):
         """ Creates a subnode for the current node """
 
-        return self.__class__(ID, data,
+        return self.__class__(data,
                 axis=self.sel_axis(self.axis),
                 sel_axis=self.sel_axis,
                 dimensions=self.dimensions)
@@ -309,7 +311,6 @@ class KDNode(Node):
         # deleting a leaf node is trivial
         if self.is_leaf:
             self.data = None
-            self.ID = None
             return self
 
         # we have to delete a non-leaf node here
@@ -542,7 +543,7 @@ class KDNode(Node):
 
 
 
-def create(ID=None,point_list=None, dimensions=None, axis=0, sel_axis=None):
+def create(point_list=None, dimensions=None, axis=0, sel_axis=None):
     """ Creates a kd-tree from a list of points
     All points in the list must be of the same dimensionality.
     If no point_list is given, an empty tree is created. The number of
@@ -562,7 +563,7 @@ def create(ID=None,point_list=None, dimensions=None, axis=0, sel_axis=None):
     sel_axis = sel_axis or (lambda prev_axis: (prev_axis+1) % dimensions)
 
     if not point_list:
-        return KDNode(ID=ID, sel_axis=sel_axis, axis=axis, dimensions=dimensions)
+        return KDNode(sel_axis=sel_axis, axis=axis, dimensions=dimensions)
 
     # Sort point list and choose median as pivot element
     point_list = list(point_list)

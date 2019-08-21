@@ -12,12 +12,12 @@ def Def_Role():
 	role = input()
 
 	if role == "S" or role == "s":
-		server = Compute_Engine()
-		server.network_server_connection()
+		server = Engine_UI()
+		server.connect_to_network()
 
 	elif role == "C" or role == "c":
-		client = Client()
-		client.network_server_connection()
+		client = Client_UI()
+		client.connect_to_network()
 
 	else:
 		Def_Role()
@@ -35,7 +35,8 @@ if __name__ == "__main__":
 	while True:
 		try:
 			Def_Role()
-		except:
+		except Exception as e:
+			print(e)
 			print("\ndone")
 			break
 
