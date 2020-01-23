@@ -1,0 +1,114 @@
+{
+    "successful-responses": {
+        "key-count": {
+            "message"       : "Key count retrieved successfully",
+            "key-count"     : 4,
+            "shard-id"      : "1",
+            "causal-context": {}
+        },
+
+        "shard-membership": {
+            "message"       : "Shard membership retrieved successfully",
+            "causal-context": {},
+
+            "shards"        : {
+                "<shard-id>": 4,
+                "<shard-id>": 5
+            }
+        },
+
+        "get-shard": {
+            "message"       : "Shard information retrieved successfully",
+            "shard-id"      : "1",
+            "key-count"     : 4,
+            "causal-context": {},
+
+            "replicas"      : [
+                "10.10.0.2:13800",
+                "10.10.0.3:13800"
+            ]
+        },
+
+        "view-change": {
+            "message"       : "View change successful",
+            "causal-context": {},
+
+            "shards"        : [
+                {
+                    "shard-id" : 1,
+                    "key-count": 4,
+                    "replicas" : [ "10.10.0.2:13800", "10.10.0.3:13800" ]
+                },
+                {
+                    "shard-id" : 2,
+                    "key-count": 5,
+                    "replicas" : [ "10.10.0.4:13800", "10.10.0.5:13800" ]
+                }
+            ]
+        },
+
+        "insert-key": {
+            "message"       : "Added successfully",
+            "replaced"      : false,
+            "address"       : "10.10.0.4:13800",
+            "causal-context": {}
+        },
+
+        "update-key": {
+            "message"       : "Updated successfully",
+            "replaced"      : true,
+            "causal-context": {}
+        },
+
+        "get-key": {
+            "message"       : "Retrieved successfully",
+            "doesExist"     : true,
+            "value"         : "sampleValue",
+            "address"       : "10.10.0.4:13800",
+            "causal-context": {}
+        },
+
+        "delete-key": {
+            "message"       : "Deleted successfully",
+            "doesExist"     : true,
+            "address"       : "10.10.0.3:13800",
+            "causal-context": {}
+        }
+
+    },
+    "failure-responses": {
+        "insert-key-missing": {
+            "message"       : "Error in PUT",
+            "error"         : "Value is missing",
+            "causal-context": {}
+        },
+
+        "insert-key-long": {
+            "message"       : "Error in PUT",
+            "error"         : "Key is too long",
+            "address"       : "10.10.0.4:13800",
+            "causal-context": {}
+        },
+
+        "update-key-missing": {
+            "message"       : "Error in PUT",
+            "error"         : "Value is missing",
+            "causal-context": {}
+        },
+
+        "get-key": {
+            "message"       : "Error in GET",
+            "error"         : "Key does not exist",
+            "doesExist"     : false,
+            "address"       : "10.10.0.4:13800",
+            "causal-context": {}
+        },
+
+        "delete-key": {
+            "message"       : "Error in DELETE",
+            "error"         : "Key does not exist",
+            "doesExist"     : false,
+            "causal-context": {}
+        }
+    }
+}
