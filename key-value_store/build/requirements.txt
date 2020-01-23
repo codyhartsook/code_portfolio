@@ -1,4 +1,4 @@
-Flask==0.12.2
+Flask
 requests
 xxhash
 APScheduler==2.1.2
